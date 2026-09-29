@@ -45,6 +45,37 @@ thật dùng S3 của AWS hoặc MinIO cài trên máy chủ.
 
 ---
 
+## Trước khi lên môi trường thật
+
+Repo này **công khai**, nên mọi giá trị trong `.env.example` là thứ ai cũng đọc
+được. Lớp lỗi cần chặn không phải "lộ mật khẩu dev" mà là `cp .env.example .env`
+rồi mang thẳng lên máy chủ: hệ thống chạy hoàn toàn bình thường, không dấu hiệu
+nào, và ai đọc repo cũng ký được token hợp lệ.
+
+Ba lớp gác:
+
+1. **`docker-compose.yml` không có giá trị mặc định** cho mật khẩu. Thiếu
+   `.env` thì `docker compose up` vỡ ngay với câu chỉ rõ thiếu biến nào — thay
+   vì chạy bằng một mật khẩu nằm sẵn trong repo.
+2. **Role CSDL nhận mật khẩu từ biến môi trường** (`docker/postgres/init/01-roles.sh`),
+   không ghi cứng trong mã nguồn.
+3. **API từ chối khởi động** khi `NODE_ENV=production` mà bí mật vẫn là giá trị
+   mẫu hoặc ngắn dưới 32 ký tự (`common/config-guard.ts`, 8 phép kiểm).
+
+```bash
+# Sinh bí mật mới cho môi trường thật
+openssl rand -base64 48   # JWT_ACCESS_SECRET
+openssl rand -base64 48   # JWT_REFRESH_SECRET
+openssl rand -base64 32   # TENANT_SECRET_KEY
+```
+
+Ngoài ra còn ba việc **chưa làm** và bắt buộc trước khi có khách thật:
+tách `pt_migrator` khỏi SUPERUSER, đặt lịch cho bốn job nền (đối soát, làm mới
+báo cáo, dọn tệp mồ côi, đóng buổi tập), và kịch bản khôi phục dữ liệu một
+phòng tập. Chi tiết ở [Còn phải làm](#còn-phải-làm).
+
+---
+
 ## Cách ly đa phòng — đọc mục này trước khi viết dòng code đầu tiên
 
 Toàn bộ thiết kế xoay quanh một câu: **dữ liệu của phòng tập này không được rơi

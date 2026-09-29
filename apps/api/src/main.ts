@@ -3,8 +3,13 @@ import { NestFactory } from '@nestjs/core';
 import { Logger } from '@nestjs/common';
 import helmet from 'helmet';
 import { AppModule } from './app.module';
+import { assertCauHinhSanSang } from './common/config-guard';
 
 async function bootstrap(): Promise<void> {
+  // Kiểm TRƯỚC khi dựng ứng dụng: thà không khởi động còn hơn khởi động với
+  // bí mật mà cả thế giới đọc được trong .env.example.
+  assertCauHinhSanSang();
+
   const app = await NestFactory.create(AppModule, { bufferLogs: false });
   app.use(helmet());
   app.setGlobalPrefix('api');

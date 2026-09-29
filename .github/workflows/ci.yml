@@ -16,7 +16,7 @@ jobs:
         image: postgres:17-alpine
         env:
           POSTGRES_USER: pt_migrator
-          POSTGRES_PASSWORD: pt_dev_pw
+          POSTGRES_PASSWORD: ci-throwaway
           POSTGRES_DB: pt
         ports: ['5432:5432']
         options: >-
@@ -24,10 +24,10 @@ jobs:
           --health-interval 5s --health-timeout 3s --health-retries 20
 
     env:
-      DATABASE_URL: postgres://pt_migrator:pt_dev_pw@localhost:5432/pt
-      DATABASE_URL_APP: postgres://app_rw:pt_dev_pw@localhost:5432/pt
-      DATABASE_URL_AUTH: postgres://app_auth:pt_dev_pw@localhost:5432/pt
-      DATABASE_URL_PLATFORM: postgres://app_platform:pt_dev_pw@localhost:5432/pt
+      DATABASE_URL: postgres://pt_migrator:ci-throwaway@localhost:5432/pt
+      DATABASE_URL_APP: postgres://app_rw:ci-throwaway@localhost:5432/pt
+      DATABASE_URL_AUTH: postgres://app_auth:ci-throwaway@localhost:5432/pt
+      DATABASE_URL_PLATFORM: postgres://app_platform:ci-throwaway@localhost:5432/pt
       JWT_ACCESS_SECRET: ci-access-secret
       JWT_REFRESH_SECRET: ci-refresh-secret
       JWT_ACCESS_TTL_SECONDS: '900'
@@ -46,7 +46,13 @@ jobs:
       # Giữ NGUYÊN thuộc tính của từng role — app_rw mà có BYPASSRLS thì cổng gác
       # nhóm B đỏ, đúng như mong muốn.
       - name: Tạo role ứng dụng
-        run: psql "$DATABASE_URL" -f docker/postgres/init/01-roles.sql
+        env:
+          APP_DB_PASSWORD: ci-throwaway
+          POSTGRES_USER: pt_migrator
+          POSTGRES_DB: pt
+          PGHOST: localhost
+          PGPASSWORD: ci-throwaway
+        run: bash docker/postgres/init/01-roles.sh
 
       - run: pnpm db:migrate
       - run: pnpm db:seed

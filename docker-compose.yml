@@ -12,7 +12,9 @@ services:
     container_name: pt-postgres
     environment:
       POSTGRES_USER: pt_migrator          # chủ sở hữu schema, KHÔNG phải role app dùng
-      POSTGRES_PASSWORD: ${DB_PASSWORD:-pt_dev_pw}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?Thiếu DB_PASSWORD — chạy `cp .env.example .env` trước}
+      # Mật khẩu của ba role ứng dụng, dùng bởi docker/postgres/init/01-roles.sh
+      APP_DB_PASSWORD: ${DB_PASSWORD:?Thiếu DB_PASSWORD}
       POSTGRES_DB: pt
       TZ: Asia/Ho_Chi_Minh
     command:
@@ -34,11 +36,11 @@ services:
   redis:
     image: redis:7-alpine
     container_name: pt-redis
-    command: redis-server --requirepass ${REDIS_PASSWORD:-pt_dev_pw} --appendonly yes
+    command: redis-server --requirepass ${REDIS_PASSWORD:?Thiếu REDIS_PASSWORD} --appendonly yes
     ports: ['56379:6379']
     volumes: ['pt-redisdata:/data']
     healthcheck:
-      test: ['CMD-SHELL', 'redis-cli -a ${REDIS_PASSWORD:-pt_dev_pw} ping | grep -q PONG']
+      test: ['CMD-SHELL', 'redis-cli -a ${REDIS_PASSWORD:?Thiếu REDIS_PASSWORD} ping | grep -q PONG']
       interval: 5s
       timeout: 3s
       retries: 20
@@ -50,8 +52,8 @@ services:
       SERVICES: s3
       AWS_DEFAULT_REGION: us-east-1
       # LocalStack nhận mọi credential; giữ trùng .env cho đỡ nhầm khi đổi sang thật.
-      AWS_ACCESS_KEY_ID: ${S3_ACCESS_KEY:-test}
-      AWS_SECRET_ACCESS_KEY: ${S3_SECRET_KEY:-test}
+      AWS_ACCESS_KEY_ID: ${S3_ACCESS_KEY:?Thiếu S3_ACCESS_KEY}
+      AWS_SECRET_ACCESS_KEY: ${S3_SECRET_KEY:?Thiếu S3_SECRET_KEY}
     ports: ['59000:4566']
     volumes:
       - pt-s3data:/var/lib/localstack
