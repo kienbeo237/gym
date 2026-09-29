@@ -1,0 +1,35 @@
+{
+  "name": "pt",
+  "private": true,
+  "packageManager": "pnpm@9.15.9",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "infra:up": "docker compose up -d",
+    "infra:down": "docker compose down",
+    "infra:reset": "docker compose down -v && docker compose up -d",
+    "db:migrate": "tsx db/migrate.ts up",
+    "db:status": "tsx db/migrate.ts status",
+    "db:seed": "tsx db/seed.ts",
+    "db:types": "kysely-codegen --dialect postgres --out-file packages/contracts/src/db.ts",
+    "dev": "turbo run dev",
+    "build": "turbo run build",
+    "test": "turbo run test",
+    "lint": "turbo run lint"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "kysely-codegen": "^0.17.0",
+    "tsx": "^4.19.2",
+    "turbo": "^2.3.3",
+    "typescript": "^5.7.2",
+    "@types/bcryptjs": "^2.4.6"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.7",
+    "kysely": "^0.27.5",
+    "pg": "^8.13.1",
+    "bcryptjs": "^2.4.3"
+  }
+}

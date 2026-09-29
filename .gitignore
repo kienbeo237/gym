@@ -1,0 +1,12 @@
+node_modules/
+dist/
+.next/
+.turbo/
+*.tsbuildinfo
+.env
+.env.local
+coverage/
+*.log
+# db.d.ts duoc COMMIT: build va CI khong can DB de bien dich
+next-env.d.ts
+.env.local

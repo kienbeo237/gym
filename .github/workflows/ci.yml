@@ -1,0 +1,64 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+
+jobs:
+  build-and-guard:
+    runs-on: ubuntu-latest
+
+    # Postgres dựng ngay trong job: các cổng gác cách ly tenant đọc pg_catalog
+    # và chạy truy vấn thật bằng role app_rw, không giả lập được.
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: pt_migrator
+          POSTGRES_PASSWORD: pt_dev_pw
+          POSTGRES_DB: pt
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U pt_migrator -d pt"
+          --health-interval 5s --health-timeout 3s --health-retries 20
+
+    env:
+      DATABASE_URL: postgres://pt_migrator:pt_dev_pw@localhost:5432/pt
+      DATABASE_URL_APP: postgres://app_rw:pt_dev_pw@localhost:5432/pt
+      DATABASE_URL_AUTH: postgres://app_auth:pt_dev_pw@localhost:5432/pt
+      DATABASE_URL_PLATFORM: postgres://app_platform:pt_dev_pw@localhost:5432/pt
+      JWT_ACCESS_SECRET: ci-access-secret
+      JWT_REFRESH_SECRET: ci-refresh-secret
+      JWT_ACCESS_TTL_SECONDS: '900'
+      JWT_REFRESH_TTL_DAYS: '30'
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with: { version: 9 }
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: pnpm }
+
+      - run: pnpm install --frozen-lockfile
+
+      # `services:` không chạy docker-entrypoint-initdb.d, nên role phải tạo ở đây.
+      # Giữ NGUYÊN thuộc tính của từng role — app_rw mà có BYPASSRLS thì cổng gác
+      # nhóm B đỏ, đúng như mong muốn.
+      - name: Tạo role ứng dụng
+        run: psql "$DATABASE_URL" -f docker/postgres/init/01-roles.sql
+
+      - run: pnpm db:migrate
+      - run: pnpm db:seed
+      - run: pnpm --filter @pt/contracts build
+
+      # Type sinh từ CSDL được commit. Nếu schema đổi mà quên chạy `pnpm db:types`
+      # thì bản trong repo đã cũ — bắt ngay ở đây thay vì để lộ lúc chạy.
+      - name: Type Kysely khớp schema hiện tại
+        run: |
+          pnpm db:types
+          git diff --exit-code packages/contracts/src/db.ts \
+            || (echo "::error::db.ts đã cũ. Chạy: pnpm db:types rồi commit."; exit 1)
+
+      - run: pnpm --filter @pt/api test
+      - run: pnpm build
