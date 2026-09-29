@@ -74,3 +74,10 @@ export type PreTokenClaims = {
   iat: number;
   exp: number;
 };
+
+export const OtpRequestResponse = z.object({
+  sent: z.literal(true),
+  /** CHỈ có ở môi trường dev — không bao giờ xuất hiện ở production. */
+  devCode: z.string().optional(),
+});
+export type OtpRequestResponse = z.infer<typeof OtpRequestResponse>;

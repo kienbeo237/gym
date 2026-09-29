@@ -3,10 +3,14 @@ import { ConfigModule } from '@nestjs/config';
 import { APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
 import { JwtModule } from '@nestjs/jwt';
 import { DatabaseModule } from './db/database.module';
+import { RedisModule } from './redis/redis.module';
 import { CommonModule } from './common/common.module';
 import { JwtAuthGuard, TenantContextInterceptor } from './common/auth.guard';
 import { AuthModule } from './auth/auth.module';
 import { MemberModule } from './member/member.module';
+import { TrainerModule } from './trainer/trainer.module';
+import { PackageModule } from './package/package.module';
+import { StorageModule } from './storage/storage.module';
 import { HealthModule } from './health/health.module';
 
 @Module({
@@ -15,9 +19,13 @@ import { HealthModule } from './health/health.module';
     ConfigModule.forRoot({ isGlobal: true, envFilePath: ['../../.env'] }),
     JwtModule.register({ global: true }),
     DatabaseModule,
+    RedisModule,
     CommonModule,
     AuthModule,
     MemberModule,
+    TrainerModule,
+    PackageModule,
+    StorageModule,
     HealthModule,
   ],
   providers: [

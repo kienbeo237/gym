@@ -1,5 +1,5 @@
 import type { MemberSummary, Paged } from '@pt/contracts';
-import { apiFetch, requireSession } from '../../lib/session';
+import { apiFetch, requireSession } from '../../../lib/session';
 
 /**
  * Server Component: gọi API bằng token trong cookie httpOnly, render sẵn HTML.
@@ -18,7 +18,7 @@ export default async function MembersPage({
   );
 
   return (
-    <main style={S.page}>
+    <main>
       <header style={S.header}>
         <div>
           <h1 style={S.h1}>Hội viên</h1>
@@ -84,7 +84,6 @@ export default async function MembersPage({
 }
 
 const S: Record<string, React.CSSProperties> = {
-  page: { minHeight: '100dvh', background: '#0f1115', color: '#e8ebf2', padding: '32px 28px' },
   header: {
     display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end',
     gap: 16, marginBottom: 20, flexWrap: 'wrap',

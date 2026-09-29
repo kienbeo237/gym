@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Inject,
   Injectable,
   UnauthorizedException,
@@ -20,6 +21,10 @@ import type {
   AccessTokenClaims,
 } from '@pt/contracts';
 import { DB_AUTH } from '../db/database.module';
+import { RateLimitService } from '../redis/rate-limit.service';
+import { globalKey, phoneKeyPart } from '../redis/redis-keys';
+
+const sha256 = (v: string): string => createHash('sha256').update(v).digest('hex');
 
 /**
  * Xác thực chạy TRƯỚC khi có ngữ cảnh tenant, nên nó là nơi DUY NHẤT dùng
@@ -34,15 +39,28 @@ export class AuthService {
     @Inject(DB_AUTH) private readonly db: Kysely<DB>,
     private readonly jwt: JwtService,
     private readonly cfg: ConfigService,
+    private readonly rate: RateLimitService,
   ) {}
 
   private hashToken(raw: string): string {
     // sha256 chứ không phải bcrypt: đây là token ngẫu nhiên 256 bit, không phải
     // mật khẩu người đặt, nên không cần làm chậm — và refresh chạy rất thường.
-    return createHash('sha256').update(raw).digest('hex');
+    return sha256(raw);
   }
 
   async login(req: LoginRequest): Promise<LoginResponse> {
+    // Chặn dò mật khẩu. Khoá băm số điện thoại vì nó là dữ liệu cá nhân và
+    // Redis không phải nơi để nó nằm ở dạng đọc được.
+    const k = globalKey('login', 'pw', phoneKeyPart(req.phone, (s) => sha256(s)));
+    const verdict = await this.rate.hit(k, 10, 900);
+    if (!verdict.allowed) {
+      throw new BadRequestException({
+        code: 'LOGIN_RATE_LIMITED',
+        message: 'Bạn đã đăng nhập sai quá nhiều lần. Vui lòng thử lại sau.',
+        retryAfterSeconds: verdict.retryAfterSeconds,
+      });
+    }
+
     const identity = await this.db
       .selectFrom('identity')
       .select(['id', 'full_name', 'password_hash', 'status'])
@@ -56,6 +74,31 @@ export class AuthService {
     if (!identity || !ok) throw new UnauthorizedException('INVALID_CREDENTIALS');
     if (identity.status !== 'ACTIVE') throw new ForbiddenException('ACCOUNT_LOCKED');
 
+    await this.rate.reset(k);
+    await this.db
+      .updateTable('identity')
+      .set({ last_login_at: new Date() })
+      .where('id', '=', identity.id)
+      .execute();
+
+    return this.completeAuthentication(identity.id);
+  }
+
+  /**
+   * Kết thúc bước 1 sau khi đã xác thực được NGƯỜI, bằng bất kỳ cách nào —
+   * mật khẩu hoặc OTP. Tách ra để hai đường đăng nhập cho ra đúng cùng một kết
+   * quả: cùng preToken, cùng danh sách phòng, cùng thời hạn.
+   *
+   * Hai đường tự dựng preToken riêng là hai chỗ để lệch nhau về sau (thời hạn,
+   * claim thiếu), và lệch ở đây là lệch về bảo mật.
+   */
+  async completeAuthentication(identityId: string): Promise<LoginResponse> {
+    const identity = await this.db
+      .selectFrom('identity')
+      .select(['id', 'full_name'])
+      .where('id', '=', identityId)
+      .executeTakeFirstOrThrow();
+
     const tenants = await this.tenantsOf(identity.id);
     if (tenants.length === 0) throw new ForbiddenException('NO_TENANT_MEMBERSHIP');
 
@@ -63,12 +106,6 @@ export class AuthService {
       { sub: identity.id, stage: 'SELECT_TENANT' } satisfies Omit<PreTokenClaims, 'iat' | 'exp'>,
       { secret: this.cfg.getOrThrow('JWT_ACCESS_SECRET'), expiresIn: '5m' },
     );
-
-    await this.db
-      .updateTable('identity')
-      .set({ last_login_at: new Date() })
-      .where('id', '=', identity.id)
-      .execute();
 
     return { preToken, identityId: identity.id, fullName: identity.full_name, tenants };
   }

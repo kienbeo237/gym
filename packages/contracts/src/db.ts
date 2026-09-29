@@ -127,13 +127,15 @@ export interface CommissionPolicy {
 
 export interface FileObject {
   bucket: string;
+  confirmed_at: Timestamp | null;
   created_at: Generated<Timestamp>;
   id: Generated<string>;
   mime: string;
   object_key: string;
   owner_id: string | null;
   owner_type: string;
-  size_bytes: Int8;
+  size_bytes: Int8 | null;
+  status: Generated<string>;
   tenant_id: string;
   uploaded_by: string | null;
 }
@@ -283,6 +285,7 @@ export interface PackageTemplate {
   no_show_deducts: boolean | null;
   price: Int8;
   sessions: number;
+  sort_order: Generated<number>;
   tenant_id: string;
   updated_at: Generated<Timestamp>;
   valid_days: number;

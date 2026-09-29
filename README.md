@@ -3,8 +3,10 @@
 PostgreSQL · NestJS · Next.js · S3 · Redis. Một cài đặt phục vụ nhiều phòng tập,
 cách ly dữ liệu ở tầng cơ sở dữ liệu.
 
-**Trạng thái: Phase 0 xong** — nền multi-tenant, xác thực hai bước, một lát cắt
-nghiệp vụ chạy thật (hội viên) và bốn cổng gác tự động. Xem [Còn phải làm](#còn-phải-làm).
+**Trạng thái: Phase 0 + 1 xong.**
+Phase 0 — nền multi-tenant, xác thực hai bước, lát cắt hội viên, cổng gác tự động.
+Phase 1 — đăng nhập OTP, huấn luyện viên (kèm khung giờ & hoa hồng), gói tập,
+tải tệp S3. Xem [Còn phải làm](#còn-phải-làm).
 
 ---
 
@@ -93,7 +95,7 @@ trao transaction cho lời gọi. Service nghiệp vụ **không được** tiê
 ### Lớp 4 — Bốn cổng gác tự động
 
 ```bash
-pnpm --filter @pt/api test     # 20 phép kiểm
+pnpm --filter @pt/api test     # 28 phép kiểm
 ```
 
 | Nhóm | Bắt lớp lỗi |
@@ -102,11 +104,16 @@ pnpm --filter @pt/api test     # 20 phép kiểm
 | B. Đặc quyền | role app bị cấp `SUPERUSER`/`BYPASSRLS` khi dựng môi trường |
 | C. Khoá | `UNIQUE` thiếu `tenant_id` |
 | D. Hành vi | đọc/ghi chéo tenant, bằng **chính role app_rw** |
-| + Kỷ luật | tiêm `DB_PLATFORM` vào service nghiệp vụ, hoặc dùng `SET` thay `set_config` |
+| Kỷ luật CSDL | tiêm `DB_PLATFORM` vào service nghiệp vụ, hoặc dùng `SET` thay `set_config` |
+| Khoá Redis | khoá cache thiếu tiền tố `t:<tenantId>:` — rò dữ liệu qua đường cache |
 
-Hai nhóm có **test âm** chống tautology: chúng tự tạo một vi phạm giả lập và đòi
+Bốn nhóm có **test âm** chống tautology: chúng tự tạo một vi phạm giả lập và đòi
 bộ nhận diện bắt được. Không có test âm thì một truy vấn luôn trả rỗng cũng làm
 mọi thứ xanh, và cổng gác thành trang trí.
+
+Bộ nhận diện phải **chính xác**, không chỉ nghiêm. Bản đầu của cổng gác Redis bắt
+`.get(` trần nên kêu oan cả `cfg.get('S3_REGION')`; một cổng gác kêu oan sẽ bị
+người ta tắt đi, và khi đó nó tệ hơn không có.
 
 ### Ba role, ba mức quyền
 
@@ -192,6 +199,76 @@ Phòng đặt mặc định ở `tenant_policy`, gói ghi đè từng ô ở `pa
 `resolve_booking_policy()` — ba chỗ `COALESCE` rải rác là ba cơ hội để chúng trôi
 khỏi nhau.
 
+### Đăng nhập OTP
+
+Đường chính cho **hội viên** — họ được lễ tân tạo tài khoản rồi không bao giờ
+đăng nhập lại cho tới khi cần xem số buổi còn lại, nên mật khẩu là thứ họ không
+có. Mật khẩu giữ cho nhân viên.
+
+Sáu điểm bắt buộc, mỗi điểm ứng với một cách phá:
+
+1. **Không lưu mã thô** — lưu sha256.
+2. **So sánh thời gian hằng** (`timingSafeEqual`); `===` để lộ thông tin qua thời
+   gian phản hồi.
+3. **Không tiết lộ số điện thoại có tồn tại hay không** — số lạ vẫn trả
+   `{sent: true}`, chỉ là không mã nào được tạo. Trả lỗi khác nhau là biến
+   endpoint này thành công cụ dò danh sách khách hàng.
+4. **Đếm số lần nhập sai trên chính bản ghi OTP**, không chỉ trên Redis. Redis là
+   bộ nhớ tạm; mất nó là mất bộ đếm, và kẻ tấn công chỉ cần chờ nó khởi động lại.
+5. **Mã dùng một lần** (`consumed_at`) — nó nằm trong tin nhắn đã gửi đi.
+6. **`randomInt` của `node:crypto`**, không phải `Math.random`.
+
+Xin mã mới **vô hiệu mọi mã cũ chưa dùng**. Thiếu bước này thì số lần thử thực tế
+nhân lên theo số lần người dùng bấm "gửi lại".
+
+### Redis: giới hạn tần suất và khoá phân tán
+
+Cửa sổ cố định (`INCR` + `EXPIRE`) — hai lệnh, không cần Lua. Sai số tệ nhất là
+cho qua gấp đôi hạn mức ở ranh giới cửa sổ; với OTP và đăng nhập thì vô hại.
+
+**Fail-open khi Redis chết, có chủ đích.** Đây là lớp chống lạm dụng, không phải
+lớp phân quyền — Redis sập mà chặn hết đăng nhập là tự gây sự cố lớn hơn thứ đang
+phòng. Lưới an toàn nằm ở CSDL: số lần nhập sai ở trên chính bản ghi OTP.
+
+Mọi khoá đi qua `redis-keys.ts`, chỉ hai không gian tên: `t:<tenantId>:` cho dữ
+liệu của phòng, `g:` cho thứ trước-khi-có-tenant. `tenantKey()` **từ chối** giá trị
+không phải uuid — `tenantKey(undefined, …)` sẽ tạo khoá `t:undefined:…` mà mọi
+phòng cùng dùng chung, một cache rò hoàn hảo không báo lỗi ở đâu.
+
+### Tải tệp lên S3: ba bước, và bước 3 là bước quan trọng nhất
+
+```
+1. xin URL  -> ghi file_object PENDING, ký presigned PUT
+2. trình duyệt PUT THẲNG lên S3        (không đi qua API)
+3. xác nhận -> HeadObject đọc lại kích thước và kiểu THẬT từ S3
+```
+
+Không proxy tệp qua API: mười người cùng tải ảnh 15MB là 150MB nằm trong RAM của
+tiến trình Node, và nó chết trước khi ai kịp nhận ra nguyên nhân.
+
+**Bỏ bước 3 thì mọi con số trong CSDL là do client khai.** Client khai 1KB rồi tải
+lên 2GB thì hạn mức thành trang trí. Đo thật: client khai 12.345 B, S3 trả về
+160 B — con số vào CSDL là 160.
+
+Khoá S3 do **máy chủ** dựng: `t/<tenantId>/<loại>/<uuid><đuôi>`. Tên tệp người
+dùng đặt CHỈ dùng để lấy đuôi — nó chứa được `../`, ký tự điều khiển, và tên của
+khách hàng khác. Tiền tố tenant được `CHECK file_key_tenant_prefix` ép ở CSDL, nên
+lỗi ở tầng ứng dụng vỡ ngay lúc ghi chứ không lặng lẽ đặt tệp vào thư mục phòng
+khác.
+
+Hạn URL tải về theo loại tệp: ảnh tiến độ cơ thể **60 giây**, hoá đơn 5 phút, logo
+1 giờ.
+
+### Khung giờ PT và chính sách gói: thay TOÀN BỘ, không vá từng phần
+
+`setAvailability` xoá hết rồi ghi lại trong một transaction. Ràng buộc
+không-chồng-giờ nằm ở DB (`excl_availability_overlap`), nên vá từng khung sẽ vỡ ở
+**trạng thái trung gian** dù kết quả cuối hoàn toàn hợp lệ — ví dụ đổi chỗ hai
+khung cho nhau. Xoá-rồi-ghi thì không có trạng thái trung gian nào để vỡ.
+
+Cùng lý do, chính sách hoa hồng của PT là **bản ghi có hiệu lực theo ngày**, không
+sửa tại chỗ: hoa hồng đã tính của tháng trước phải giữ nguyên căn cứ của nó.
+
 ### Múi giờ
 
 Lưu `timestamptz`, gộp báo cáo bằng `AT TIME ZONE 'Asia/Ho_Chi_Minh'`. Buổi 6h
@@ -234,9 +311,13 @@ Ba quy tắc:
 apps/api/            NestJS
   src/common/        TenantDb, ngữ cảnh tenant, guard, pipe zod
   src/db/            ba kết nối / ba role
-  src/auth/          đăng nhập hai bước, refresh xoay vòng
+  src/redis/         token DI, giới hạn tần suất, không gian tên khoá
+  src/auth/          đăng nhập hai bước (mật khẩu + OTP), refresh xoay vòng
   src/member/        lát cắt nghiệp vụ mẫu — đọc nó trước khi viết module mới
-  test/              cổng gác cách ly + kỷ luật truy cập
+  src/trainer/       PT, khung giờ, chính sách hoa hồng
+  src/package/       gói tập, chính sách huỷ/vắng ghi đè
+  src/storage/       presigned S3 ba bước
+  test/              4 cổng gác
 apps/web/            Next.js App Router, Server Component gọi API bằng cookie httpOnly
 packages/contracts/  zod DTO + type CSDL, dùng chung hai đầu
 db/migrations/       SQL viết tay, chạy tuần tự
@@ -250,7 +331,7 @@ Theo thứ tự, vì mỗi bước dựa vào bước trước:
 
 | Phase | Nội dung |
 | --- | --- |
-| 1 | Đăng nhập OTP (hạ tầng `otp_challenge` đã có), CRUD PT, gói tập, upload S3 presigned |
+| ~~1~~ | ~~Đăng nhập OTP, CRUD PT, gói tập, upload S3 presigned~~ — xong 29/09/2026 |
 | 2 | Bán gói, hoá đơn trả góp, thu tiền, hoa hồng `SALE` |
 | 3 | Lịch tập, điểm danh QR, hoa hồng `TEACH`, `revenue_entry` |
 | 4 | Báo cáo doanh số, bảng lương PT, materialized view |
@@ -260,10 +341,16 @@ Theo thứ tự, vì mỗi bước dựa vào bước trước:
 
 ### Chưa làm, biết là chưa làm
 
-- **Redis mới chỉ chạy, chưa dùng.** BullMQ, cache, khoá phân tán đều thuộc phase
-  sau. Khi thêm: 3 hàng đợi theo **độ trễ** (`realtime`/`bulk`/`scheduled`), không
-  phải theo tenant — 200 phòng × 3 hàng đợi là 600 hàng đợi và Redis sập vì số
-  lượng chứ không vì tải. Mọi khoá cache bắt buộc có tiền tố `t:{tenantId}:`.
+- **Redis mới dùng cho giới hạn tần suất; BullMQ và cache chưa có.** Hàm
+  `RateLimitService.acquire()` (khoá phân tán) đã viết nhưng **chưa nơi nào gọi** —
+  nó dành cho làm mới token Zalo OA ở phase 6. Khi thêm hàng đợi: 3 queue theo
+  **độ trễ** (`realtime`/`bulk`/`scheduled`), không phải theo tenant — 200 phòng ×
+  3 hàng đợi là 600 hàng đợi và Redis sập vì số lượng chứ không vì tải.
+- **`cleanupOrphans()` của StorageService chưa có lịch chạy.** Hàm đã viết và
+  chạy được, nhưng chưa gắn cron nên tệp `PENDING` quá hạn vẫn nằm lại trong
+  bucket. Gắn khi có BullMQ.
+- **Chưa có màn hình THÊM/SỬA cho PT và gói tập.** API đủ (`POST`/`PATCH`/
+  `DELETE`), web mới có danh sách. Cùng lý do, chưa có màn tải ảnh đại diện.
 - **Chưa có worker Zalo.** Khi làm: ghi `notification_outbox` **trong** transaction
   nghiệp vụ, gửi ở tiến trình khác. Gọi HTTP trong transaction thì mạng chậm sẽ
   giữ khoá trên `member_package` và kéo sập cả luồng điểm danh. Token OA xoay vòng

@@ -23,8 +23,16 @@ const SRC = join(__dirname, '..', 'src');
 
 /** Chỉ những tệp này được chạm vào kết nối bỏ qua RLS. */
 const DUOC_DUNG_DB_PLATFORM = ['db/database.module.ts'];
-/** Chỉ luồng đăng nhập (chạy trước khi có tenant) được dùng app_auth. */
-const DUOC_DUNG_DB_AUTH = ['db/database.module.ts', 'auth/auth.service.ts'];
+/**
+ * Chỉ luồng đăng nhập (chạy trước khi có tenant) được dùng app_auth.
+ * `otp.service.ts` ở đây vì OTP là đường đăng nhập thứ hai: nó tra `identity`
+ * theo số điện thoại khi chưa ai biết người này thuộc phòng nào.
+ */
+const DUOC_DUNG_DB_AUTH = [
+  'db/database.module.ts',
+  'auth/auth.service.ts',
+  'auth/otp.service.ts',
+];
 /** Chỉ TenantDb được cầm Kysely thô — nó chính là cửa duy nhất. */
 const DUOC_DUNG_DB_APP = [
   'db/database.module.ts',

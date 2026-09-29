@@ -11,3 +11,6 @@ export type * from './db.js';
 export * from './auth.js';
 export * from './common.js';
 export * from './member.js';
+export * from './trainer.js';
+export * from './package.js';
+export * from './storage.js';
