@@ -14,3 +14,5 @@ export * from './member.js';
 export * from './trainer.js';
 export * from './package.js';
 export * from './storage.js';
+export * from './sale.js';
+export * from './billing.js';

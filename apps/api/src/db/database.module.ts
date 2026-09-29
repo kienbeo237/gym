@@ -1,8 +1,26 @@
 import { Global, Module, type OnApplicationShutdown } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Kysely, PostgresDialect } from 'kysely';
-import { Pool } from 'pg';
+import { Pool, types } from 'pg';
 import type { DB } from '@pt/contracts';
+
+/**
+ * Cột `date` của Postgres KHÔNG có múi giờ — nó là một ngày trên tờ lịch, không
+ * phải một thời điểm. Mặc định node-postgres dựng nó thành `Date` ở NỬA ĐÊM GIỜ
+ * MÁY CHỦ, và từ đó mọi cách quy về chuỗi đều sai một kiểu:
+ *
+ *   `String(d)`            -> "Sat Nov 28 2026 00:00:00 GMT+0700"  (sai định dạng)
+ *   `d.toISOString()`      -> "2026-11-27T17:00:00Z"               (LÙI MỘT NGÀY)
+ *
+ * Cái thứ hai nguy hiểm hơn hẳn: nó vẫn ra một ngày hợp lệ, chỉ là sai. Hạn
+ * đóng tiền, ngày hết hạn gói, ngày hiệu lực chính sách hoa hồng đều là cột
+ * `date`, và lệch một ngày ở đó là lệch tiền.
+ *
+ * Giữ nguyên chuỗi 'YYYY-MM-DD' mà Postgres trả về là cách duy nhất không có
+ * chỗ cho múi giờ chen vào. `timestamptz` thì vẫn để thành Date như thường —
+ * nó thật sự là một thời điểm.
+ */
+types.setTypeParser(types.builtins.DATE, (v) => v);
 
 /**
  * BA kết nối, BA role, ba mức quyền. Tách ra là điều kiện để RLS có nghĩa.

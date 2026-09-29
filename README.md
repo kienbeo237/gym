@@ -3,10 +3,11 @@
 PostgreSQL · NestJS · Next.js · S3 · Redis. Một cài đặt phục vụ nhiều phòng tập,
 cách ly dữ liệu ở tầng cơ sở dữ liệu.
 
-**Trạng thái: Phase 0 + 1 xong.**
+**Trạng thái: Phase 0 + 1 + 2 xong.**
 Phase 0 — nền multi-tenant, xác thực hai bước, lát cắt hội viên, cổng gác tự động.
-Phase 1 — đăng nhập OTP, huấn luyện viên (kèm khung giờ & hoa hồng), gói tập,
-tải tệp S3. Xem [Còn phải làm](#còn-phải-làm).
+Phase 1 — đăng nhập OTP, huấn luyện viên (khung giờ & hoa hồng), gói tập, tải tệp S3.
+Phase 2 — bán gói, hoá đơn trả góp, thu/hoàn tiền, hoa hồng bán hàng, đối soát.
+Xem [Còn phải làm](#còn-phải-làm).
 
 ---
 
@@ -95,7 +96,7 @@ trao transaction cho lời gọi. Service nghiệp vụ **không được** tiê
 ### Lớp 4 — Bốn cổng gác tự động
 
 ```bash
-pnpm --filter @pt/api test     # 28 phép kiểm
+pnpm --filter @pt/api test     # 38 phép kiểm
 ```
 
 | Nhóm | Bắt lớp lỗi |
@@ -106,6 +107,7 @@ pnpm --filter @pt/api test     # 28 phép kiểm
 | D. Hành vi | đọc/ghi chéo tenant, bằng **chính role app_rw** |
 | Kỷ luật CSDL | tiêm `DB_PLATFORM` vào service nghiệp vụ, hoặc dùng `SET` thay `set_config` |
 | Khoá Redis | khoá cache thiếu tiền tố `t:<tenantId>:` — rò dữ liệu qua đường cache |
+| Đối soát | số dư buổi / tiền đã thu / hoa hồng lệch khỏi sổ cái |
 
 Bốn nhóm có **test âm** chống tautology: chúng tự tạo một vi phạm giả lập và đòi
 bộ nhận diện bắt được. Không có test âm thì một truy vấn luôn trả rỗng cũng làm
@@ -136,12 +138,30 @@ người ta tắt đi, và khi đó nó tệ hơn không có.
 cache ghi trong **cùng transaction**. Cột tự trừ là nguồn của mọi tranh chấp với
 khách ("em tập 8 buổi sao trừ 10?") và không hoàn tác được khi huỷ điểm danh nhầm.
 
-Đối soát hằng đêm qua view `v_session_balance_drift`. **Lệch thì cảnh báo, không
-tự sửa** — tự sửa là giấu mất nguyên nhân.
-
 Chống trừ hai lần: `uq_ledger_checkin` là partial unique index trên
 `(ref_type, ref_id)` — hai thiết bị bấm cùng lúc thì một cái vỡ ở tầng DB, đúng
 như mong muốn.
+
+**SỐ DƯ và SỐ BUỔI ĐÃ DÙNG là hai đại lượng khác nhau** (tách ở migration 0010):
+
+| Cột | Nghĩa | Ai giữ |
+| --- | --- | --- |
+| `sessions_remaining` | `SUM(delta)` — gác việc điểm danh | trigger |
+| `sessions_used` | số buổi TIÊU THỤ — con số nghiệp vụ trên báo cáo | service |
+
+Hai số này bằng nhau trong ca thường (`total − used = remaining`) nên rất dễ
+tưởng là một. Chúng tách nhau ở đúng ba chỗ, cả ba đều là chuyện thật: **huỷ hợp
+đồng**, **tặng thêm buổi**, **chuyển buổi sang gói khác**.
+
+Phát hiện bằng chính view đối soát, trên dữ liệu thật: hợp đồng bị huỷ (mua +10,
+hoàn −10) báo lệch −10 trong khi **cả hai con số đều đúng** — số dư 0, đã dùng 0.
+Sai nằm ở công thức đối soát. Lỗi thật mà nó kéo theo: `MemberService.list` tính
+buổi còn lại bằng `total − used`, nên một dòng `BONUS +5` không hiện ra — hội
+viên được tặng buổi mà màn hình vẫn báo số cũ.
+
+**Bốn view đối soát phải RỖNG** và được kiểm trong build, không chờ job đêm: một
+view chỉ chạy lúc 2 giờ sáng trên môi trường thật là view không ai đọc kết quả.
+**Lệch thì cảnh báo, không tự sửa** — tự sửa là giấu mất nguyên nhân.
 
 ### Doanh số PT là BA con số khác nhau
 
@@ -198,6 +218,71 @@ Phòng đặt mặc định ở `tenant_policy`, gói ghi đè từng ô ở `pa
 (cột `NULL` = theo phòng). Phân giải bằng **một hàm duy nhất**
 `resolve_booking_policy()` — ba chỗ `COALESCE` rải rác là ba cơ hội để chúng trôi
 khỏi nhau.
+
+### Tiền: bất biến đặt ở CSDL, không đặt ở service
+
+Tiền được ghi từ nhiều đường — bán gói, thu đợt, hoàn tiền, huỷ hoá đơn, và
+phase sau còn thêm. Mỗi đường là một cơ hội quên. Trigger thì không quên được.
+
+| Bất biến | Giữ bởi |
+| --- | --- |
+| `invoice.paid_amount` và `status` khớp các dòng thu | trigger `sync_invoice_paid` |
+| Đợt trả góp tự đóng khi thu đủ | cùng trigger |
+| Tổng các đợt = tổng hoá đơn | `CONSTRAINT TRIGGER ... DEFERRABLE` |
+| `paid_amount >= 0` | `CHECK` — chặn hoàn quá tay |
+| Một lần thu = một dòng | `uq_payment_idem` |
+| Số dư buổi tập = `SUM(delta)` | trigger `sync_session_remaining` |
+
+Ràng buộc trả góp **phải** là `DEFERRABLE INITIALLY DEFERRED`: kiểm theo từng
+dòng thì không thể đúng — chèn đợt đầu tiên xong là tổng đã lệch. Nó chạy lúc
+`COMMIT`, khi cả bộ đợt đã ghi xong.
+
+Service đọc LẠI `invoice` sau khi ghi payment thay vì tự tính lại số dư: hai
+công thức song song là hai công thức sẽ lệch.
+
+### Hoàn tiền là dòng MỚI, không phải sửa dòng cũ
+
+`payment.kind = 'REFUND'` với `signed_amount` âm. Dòng thu ban đầu giữ nguyên.
+Hoa hồng cũng sinh **bút toán đảo** mang số âm, rơi vào kỳ lương của tháng hoàn
+tiền — bảng lương tháng trước đã chốt phải đọc lại được y nguyên. Vì thế
+`commission_entry.amount` cố ý **bỏ ràng buộc `>= 0`** ở migration 0009.
+
+### Hoa hồng bán hàng gắn với LẦN THU, không gắn với hoá đơn
+
+Nhờ đó trả góp tự động đúng tỉ lệ mà không cần công thức riêng: thu 1.500.000 thì
+hoa hồng tính trên 1.500.000. Hoá đơn nhiều hợp đồng thì chia theo **tỉ lệ giá trị
+từng dòng**, phần dư dồn vào dòng cuối, rồi **gộp theo PT** — `uq_comm_sale` là
+UNIQUE `(payment_id, trainer_id)` nên hai hợp đồng cùng người bán phải ra một dòng.
+
+Phân giải chính sách theo **bốn mức cụ thể**, một hàm SQL duy nhất:
+
+```
+(PT, gói)  >  (PT, mọi gói)  >  (mọi PT, gói)  >  (mọi PT, mọi gói)
+```
+
+**PT thắng GÓI** vì hoa hồng là điều khoản thoả thuận với *người* đó, còn tỷ lệ
+theo gói chỉ là mặc định của bảng giá. Đảo lại thì một gói khuyến mãi sẽ âm thầm
+hạ hoa hồng của PT senior, và không ai phát hiện cho tới kỳ lương.
+
+Không phân giải được thì **chặn ngay lúc BÁN** — sửa cấu hình rồi bán lại là
+xong. Ở lúc THU thì không chặn (tiền đã vào két rồi): ghi dòng 0 đồng có cờ
+`missing`, và `v_commission_needs_policy` biến nó thành việc phải xử lý thay vì
+một khoản nợ PT không ai biết.
+
+### Cột `date` KHÔNG được thành `Date`
+
+`date` của Postgres là một ngày trên tờ lịch, không phải một thời điểm. Để
+node-postgres dựng nó thành `Date` là tự tạo ra lỗi:
+
+```
+String(d)         -> "Sat Nov 28 2026 00:00:00 GMT+0700"   (sai định dạng)
+d.toISOString()   -> "2026-11-27T17:00:00Z"                (LÙI MỘT NGÀY)
+```
+
+Cái thứ hai nguy hiểm hơn hẳn — nó vẫn ra một ngày **hợp lệ**, chỉ là sai. Hạn
+đóng tiền, ngày hết hạn gói, ngày hiệu lực chính sách hoa hồng đều là cột `date`.
+Đã gặp thật ở `nextDueDate`. Cách chữa: `types.setTypeParser(DATE, v => v)` —
+giữ nguyên chuỗi `YYYY-MM-DD`, không có chỗ cho múi giờ chen vào.
 
 ### Đăng nhập OTP
 
@@ -317,6 +402,9 @@ apps/api/            NestJS
   src/trainer/       PT, khung giờ, chính sách hoa hồng
   src/package/       gói tập, chính sách huỷ/vắng ghi đè
   src/storage/       presigned S3 ba bước
+  src/commission/    phân giải chính sách + ghi hoa hồng (SALE nay, TEACH phase 3)
+  src/sale/          bán gói: hợp đồng + sổ cái + hoá đơn + trả góp, một giao dịch
+  src/billing/       hoá đơn, thu tiền, hoàn tiền, huỷ
   test/              4 cổng gác
 apps/web/            Next.js App Router, Server Component gọi API bằng cookie httpOnly
 packages/contracts/  zod DTO + type CSDL, dùng chung hai đầu
@@ -332,7 +420,7 @@ Theo thứ tự, vì mỗi bước dựa vào bước trước:
 | Phase | Nội dung |
 | --- | --- |
 | ~~1~~ | ~~Đăng nhập OTP, CRUD PT, gói tập, upload S3 presigned~~ — xong 29/09/2026 |
-| 2 | Bán gói, hoá đơn trả góp, thu tiền, hoa hồng `SALE` |
+| ~~2~~ | ~~Bán gói, hoá đơn trả góp, thu tiền, hoa hồng `SALE`~~ — xong 29/09/2026 |
 | 3 | Lịch tập, điểm danh QR, hoa hồng `TEACH`, `revenue_entry` |
 | 4 | Báo cáo doanh số, bảng lương PT, materialized view |
 | 5 | Web cho hội viên (`/me`) |
@@ -349,8 +437,16 @@ Theo thứ tự, vì mỗi bước dựa vào bước trước:
 - **`cleanupOrphans()` của StorageService chưa có lịch chạy.** Hàm đã viết và
   chạy được, nhưng chưa gắn cron nên tệp `PENDING` quá hạn vẫn nằm lại trong
   bucket. Gắn khi có BullMQ.
-- **Chưa có màn hình THÊM/SỬA cho PT và gói tập.** API đủ (`POST`/`PATCH`/
-  `DELETE`), web mới có danh sách. Cùng lý do, chưa có màn tải ảnh đại diện.
+- **Chưa có màn hình THÊM/SỬA nào trên web.** API đủ cho PT, gói tập, bán gói,
+  thu tiền và hoàn tiền; web mới có danh sách và màn xem. Cùng lý do, chưa có màn
+  tải ảnh đại diện.
+- **Chưa có xuất hoá đơn PDF.** Cột `invoice.pdf_file_id` và luồng tải tệp S3 đã
+  sẵn, chỉ thiếu bước sinh tệp.
+- **Thu tiền chưa phân bổ tự động qua nhiều đợt.** Thu 3 triệu khi đợt 1 còn thiếu
+  1 triệu thì phải gọi hai lần, mỗi lần một `scheduleId`. Phân bổ tự động là
+  quyết định nghiệp vụ (thu đợt gần nhất trước, hay đợt quá hạn trước?) — chưa chốt.
+- **Đối soát chạy trong test, chưa có lịch trên môi trường thật.** Bốn view đã có;
+  cần một job gọi chúng và báo động khi có dòng. Gắn cùng lúc với BullMQ.
 - **Chưa có worker Zalo.** Khi làm: ghi `notification_outbox` **trong** transaction
   nghiệp vụ, gửi ở tiến trình khác. Gọi HTTP trong transaction thì mạng chậm sẽ
   giữ khoá trên `member_package` và kéo sập cả luồng điểm danh. Token OA xoay vòng

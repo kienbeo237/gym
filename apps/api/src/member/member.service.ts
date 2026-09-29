@@ -10,9 +10,11 @@ export class MemberService {
 
   async list(q: ListMemberQuery): Promise<Paged<MemberSummary>> {
     return this.tdb.run(async (tx) => {
-      // Số buổi còn lại tính từ member_package (bản cache), KHÔNG từ session_ledger:
-      // danh sách phải nhanh, và bản cache đã được job đối soát đêm canh
-      // (v_session_balance_drift). Màn chi tiết thì đọc sổ cái.
+      // Số buổi còn lại đọc từ `sessions_remaining` — bản cache của SUM(delta),
+      // do trigger giữ (0010). KHÔNG tính bằng `sessions_total - sessions_used`:
+      // hai đại lượng đó tách nhau khi hợp đồng bị huỷ hoặc được tặng thêm
+      // buổi, và công thức trừ sẽ bỏ qua dòng BONUS — hội viên được tặng buổi
+      // mà màn hình vẫn báo số cũ. Gác bằng v_session_balance_drift.
       const base = tx
         .selectFrom('member as m')
         .innerJoin('identity as i', 'i.id', 'm.identity_id')
@@ -60,9 +62,7 @@ export class MemberService {
           eb
             .selectFrom('member_package as mp')
             .select((e) =>
-              e.fn
-                .coalesce(e.fn.sum<string>(sql`mp.sessions_total - mp.sessions_used`), e.val('0'))
-                .as('s'),
+              e.fn.coalesce(e.fn.sum<string>('mp.sessions_remaining'), e.val('0')).as('s'),
             )
             .whereRef('mp.member_id', '=', 'm.id')
             .where('mp.status', '=', 'ACTIVE')

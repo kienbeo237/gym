@@ -11,6 +11,9 @@ import { MemberModule } from './member/member.module';
 import { TrainerModule } from './trainer/trainer.module';
 import { PackageModule } from './package/package.module';
 import { StorageModule } from './storage/storage.module';
+import { CommissionModule } from './commission/commission.module';
+import { SaleModule } from './sale/sale.module';
+import { BillingModule } from './billing/billing.module';
 import { HealthModule } from './health/health.module';
 
 @Module({
@@ -26,6 +29,9 @@ import { HealthModule } from './health/health.module';
     TrainerModule,
     PackageModule,
     StorageModule,
+    CommissionModule,
+    SaleModule,
+    BillingModule,
     HealthModule,
   ],
   providers: [

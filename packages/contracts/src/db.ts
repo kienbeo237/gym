@@ -96,6 +96,9 @@ export interface CheckinToken {
 }
 
 export interface CommissionEntry {
+  /**
+   * VND. ÂM = bút toán đảo khi hoàn tiền. Không bao giờ sửa dòng cũ.
+   */
   amount: Int8;
   base_amount: Int8;
   booking_id: string | null;
@@ -221,7 +224,15 @@ export interface MemberPackage {
   name_snapshot: string;
   price_gross: Int8;
   price_net: Generated<Int8 | null>;
+  /**
+   * SỐ DƯ buổi tập = SUM(session_ledger.delta). Do trigger giữ, đừng ghi tay.
+   */
+  sessions_remaining: Generated<number>;
   sessions_total: number;
+  /**
+   * Số buổi ĐÃ TIÊU THỤ (điểm danh/vắng). KHÁC với sessions_total - sessions_remaining
+   *    khi hợp đồng bị huỷ hoặc được tặng thêm buổi.
+   */
   sessions_used: Generated<number>;
   sold_by_id: string | null;
   starts_on: Timestamp;
@@ -295,6 +306,7 @@ export interface Payment {
   amount: Int8;
   created_at: Generated<Timestamp>;
   id: Generated<string>;
+  idempotency_key: string | null;
   invoice_id: string;
   kind: Generated<string>;
   method: string;
@@ -501,6 +513,16 @@ export interface TrainerAvailability {
   weekday: number;
 }
 
+export interface VCommissionNeedsPolicy {
+  base_amount: Int8 | null;
+  commission_entry_id: Int8 | null;
+  earned_at: Timestamp | null;
+  payment_id: string | null;
+  resolved_on: string | null;
+  tenant_id: string | null;
+  trainer_id: string | null;
+}
+
 export interface VInvoicePaidDrift {
   cached_paid: Int8 | null;
   code: string | null;
@@ -510,10 +532,20 @@ export interface VInvoicePaidDrift {
   tenant_id: string | null;
 }
 
+export interface VSaleCommissionDrift {
+  invoice_id: string | null;
+  payment_id: string | null;
+  signed_amount: Int8 | null;
+  so_dong_hoa_hong: Int8 | null;
+  sold_by_id: string | null;
+  tenant_id: string | null;
+}
+
 export interface VSessionBalanceDrift {
+  cached_remaining: number | null;
   cached_used: number | null;
   code: string | null;
-  drift: Int8 | null;
+  ledger_remaining: Int8 | null;
   ledger_used: Int8 | null;
   member_package_id: string | null;
   sessions_total: number | null;
@@ -558,6 +590,8 @@ export interface DB {
   tenant_zns_template: TenantZnsTemplate;
   trainer: Trainer;
   trainer_availability: TrainerAvailability;
+  v_commission_needs_policy: VCommissionNeedsPolicy;
   v_invoice_paid_drift: VInvoicePaidDrift;
+  v_sale_commission_drift: VSaleCommissionDrift;
   v_session_balance_drift: VSessionBalanceDrift;
 }
