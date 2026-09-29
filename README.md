@@ -3,11 +3,12 @@
 PostgreSQL · NestJS · Next.js · S3 · Redis. Một cài đặt phục vụ nhiều phòng tập,
 cách ly dữ liệu ở tầng cơ sở dữ liệu.
 
-**Trạng thái: Phase 0 → 3 xong.**
+**Trạng thái: Phase 0 → 4 xong.**
 Phase 0 — nền multi-tenant, xác thực hai bước, lát cắt hội viên, cổng gác tự động.
 Phase 1 — đăng nhập OTP, huấn luyện viên (khung giờ & hoa hồng), gói tập, tải tệp S3.
 Phase 2 — bán gói, hoá đơn trả góp, thu/hoàn tiền, hoa hồng bán hàng, đối soát.
 Phase 3 — lịch tập, điểm danh QR, chính sách huỷ/vắng, doanh thu ghi nhận, hoa hồng dạy.
+Phase 4 — báo cáo (materialized view), bảng lương huấn luyện viên.
 Xem [Còn phải làm](#còn-phải-làm).
 
 ---
@@ -97,7 +98,7 @@ trao transaction cho lời gọi. Service nghiệp vụ **không được** tiê
 ### Lớp 4 — Bốn cổng gác tự động
 
 ```bash
-pnpm --filter @pt/api test     # 41 phép kiểm
+pnpm --filter @pt/api test     # 45 phép kiểm
 ```
 
 | Nhóm | Bắt lớp lỗi |
@@ -108,7 +109,8 @@ pnpm --filter @pt/api test     # 41 phép kiểm
 | D. Hành vi | đọc/ghi chéo tenant, bằng **chính role app_rw** |
 | Kỷ luật CSDL | tiêm `DB_PLATFORM` vào service nghiệp vụ, hoặc dùng `SET` thay `set_config` |
 | Khoá Redis | khoá cache thiếu tiền tố `t:<tenantId>:` — rò dữ liệu qua đường cache |
-| Đối soát | 7 view: số dư buổi, tiền đã thu, doanh thu, hoa hồng bán/dạy — lệch khỏi sổ cái |
+| Đối soát | 8 view: số dư buổi, tiền đã thu, doanh thu, hoa hồng bán/dạy, bảng lương |
+| Matview | materialized view bị cấp quyền cho role của app — RLS **không** bảo vệ được chúng |
 
 Bốn nhóm có **test âm** chống tautology: chúng tự tạo một vi phạm giả lập và đòi
 bộ nhận diện bắt được. Không có test âm thì một truy vấn luôn trả rỗng cũng làm
@@ -284,6 +286,97 @@ Cái thứ hai nguy hiểm hơn hẳn — nó vẫn ra một ngày **hợp lệ*
 đóng tiền, ngày hết hạn gói, ngày hiệu lực chính sách hoa hồng đều là cột `date`.
 Đã gặp thật ở `nextDueDate`. Cách chữa: `types.setTypeParser(DATE, v => v)` —
 giữ nguyên chuỗi `YYYY-MM-DD`, không có chỗ cho múi giờ chen vào.
+
+### ⚠️ RLS KHÔNG áp được cho materialized view
+
+Đo thật trước khi thiết kế phase 4:
+
+```
+ALTER MATERIALIZED VIEW mv_x ENABLE ROW LEVEL SECURITY;
+-- ERROR: This operation is not supported for materialized views.
+```
+
+Hậu quả đo được: cấp `SELECT` matview cho `app_rw` rồi đặt `app.tenant_id` =
+Alpha, nó đọc được **cả hai phòng tập**. Toàn bộ lớp cách ly của dự án bị vô
+hiệu ở đúng chỗ chứa số liệu tổng hợp — thứ mà phòng tập cạnh tranh nhau quan
+tâm nhất.
+
+Tệ hơn: **cổng gác nhóm A quét `relkind = 'r'`** (bảng thường) nên matview
+hoàn toàn **vô hình** với nó.
+
+Cách làm, và mọi matview về sau phải theo:
+
+1. matview thuộc `pt_migrator`, `REVOKE ALL` khỏi `app_rw` và `app_auth`
+2. lộ ra qua một **view thường** có mệnh đề tenant, `security_barrier`
+3. view thường chạy bằng quyền của **chủ sở hữu** (không đặt `security_invoker`),
+   nhờ đó app_rw đọc qua nó mà không chạm thẳng matview
+4. mệnh đề dùng `NULLIF(..., '')` như RLS policy — thiếu nó thì lời gọi chưa có
+   ngữ cảnh tenant nhận `invalid input syntax for type uuid` (lỗi 500) thay vì
+   0 dòng
+
+Cổng gác mới đòi: không matview nào được `app_rw`/`app_auth` đọc, và mọi view
+bọc matview phải chứa `app.tenant_id` trong định nghĩa. Có test âm cấp quyền
+giả lập rồi rollback.
+
+### Bảng lương: một dòng hoa hồng thuộc tối đa MỘT bảng lương
+
+Đó là thứ chặn trả hai lần, và nó được ép bằng cột
+`commission_entry.payroll_line_id` chứ không bằng phép kiểm ở service.
+
+Chốt lương **đóng băng** số liệu: `base_salary` được chụp ảnh, hoa hồng ghi cứng
+vào `payroll_line`. Sửa chính sách hoa hồng hay lương cứng tháng sau không làm
+đổi bảng lương đã chốt.
+
+**Cuốn mọi hoa hồng chưa trả có `period_month <= tháng chốt`, không chỉ đúng
+tháng đó.** Một lần thu tiền ghi lùi ngày (hoặc buổi tập nhập bù) sinh hoa hồng
+thuộc tháng đã chốt xong; nếu chỉ lấy đúng tháng thì khoản đó **không bao giờ
+được trả** — nó rơi vào một tháng vĩnh viễn đã đóng.
+
+Đo được: chốt tháng 9 xong, bảng lương tháng 10 của cùng PT về đúng lương cứng,
+hoa hồng bán và dạy đều bằng 0.
+
+### Ba loại số liệu, ba nơi đọc khác nhau
+
+| Loại | Nguồn | Vì sao |
+| --- | --- | --- |
+| Số liệu **của một tháng** | materialized view | tổng hợp nặng, chấp nhận độ trễ |
+| **Trạng thái hiện tại** (công nợ, gói sắp hết) | bảng gốc | không thuộc tháng nào |
+| Chi tiết một hoá đơn / một buổi | bảng gốc | phải tức thời |
+
+Màn báo cáo **hiển thị mốc làm mới**. Không nói ra thì người dùng đối chiếu với
+màn hoá đơn (đọc bảng gốc, luôn tức thời), thấy lệch, và kết luận hệ thống sai.
+
+Mốc đó do chính `refresh_reporting()` ghi vào `reporting_refresh_log` —
+PostgreSQL **không lưu** thời điểm `REFRESH MATERIALIZED VIEW`, và suy từ
+`pg_stat_get_last_analyze_time` là xấp xỉ sai vì autovacuum chạy độc lập.
+
+### "Doanh thu chưa ghi nhận" là NGHĨA VỤ, không phải tài sản
+
+Tiền đã thu cho những buổi chưa tập. Nếu khách đòi hoàn tiền ngày mai thì đây là
+số phải trả lại. Đo trên dữ liệu thật: thu ròng 17,4 triệu nhưng **15 triệu / 36
+buổi** chưa ghi nhận. Chủ phòng cần thấy con số này cạnh "đã thu", nếu không sẽ
+tiêu vào tiền của những buổi chưa dạy.
+
+### Cột `date` phải có kiểu RIÊNG trong type sinh ra
+
+kysely-codegen ánh xạ cả `date` lẫn `timestamptz` về cùng alias `Timestamp`
+(là `Date`). Nhưng từ phase 2 ứng dụng đặt `setTypeParser(DATE, v => v)` nên cột
+`date` là **chuỗi** lúc chạy. Hệ thống kiểu nói sai sự thật theo cả hai chiều:
+
+- truyền chuỗi vào `.where('period_month', '=', '2026-09-01')` bị **báo lỗi** dù
+  đó chính là thứ đúng
+- gọi `.toISOString()` lên giá trị đọc ra thì **biên dịch xanh và vỡ lúc chạy**
+
+Chiều thứ hai sai im lặng. Chữa bằng `db/patch-date-types.ts`: hỏi thẳng CSDL
+cột nào là `date` rồi đổi đúng những cột đó sang `DateString` — chính xác và
+tất định, không đoán theo tên cột. Chạy tự động trong `pnpm db:types` (20 cột).
+
+### Chỉ xuất `DB`, không xuất interface của từng bảng
+
+kysely-codegen đặt tên interface theo bảng ở dạng PascalCase (`payroll_line` →
+`PayrollLine`), và DTO tự viết rất dễ trùng. Khi trùng, TypeScript chọn một
+trong hai một cách khó đoán rồi **báo lỗi ở nơi không liên quan** — đã mắc đúng
+với `PayrollLine`. Barrel giờ chỉ xuất `DB` và các alias kiểu.
 
 ### Tiêu thụ một buổi tập: MỘT nơi duy nhất
 
@@ -489,6 +582,7 @@ apps/api/            NestJS
   src/sale/          bán gói: hợp đồng + sổ cái + hoá đơn + trả góp, một giao dịch
   src/billing/       hoá đơn, thu tiền, hoàn tiền, huỷ
   src/attendance/    lịch tập, điểm danh QR, tiêu thụ buổi (một nơi duy nhất)
+  src/report/        bảng điều khiển, báo cáo PT/gói, bảng lương
   test/              4 cổng gác
 apps/web/            Next.js App Router, Server Component gọi API bằng cookie httpOnly
 packages/contracts/  zod DTO + type CSDL, dùng chung hai đầu
@@ -506,7 +600,7 @@ Theo thứ tự, vì mỗi bước dựa vào bước trước:
 | ~~1~~ | ~~Đăng nhập OTP, CRUD PT, gói tập, upload S3 presigned~~ — xong 29/09/2026 |
 | ~~2~~ | ~~Bán gói, hoá đơn trả góp, thu tiền, hoa hồng `SALE`~~ — xong 29/09/2026 |
 | ~~3~~ | ~~Lịch tập, điểm danh QR, hoa hồng `TEACH`, `revenue_entry`~~ — xong 29/09/2026 |
-| 4 | Báo cáo doanh số, bảng lương PT, materialized view |
+| ~~4~~ | ~~Báo cáo doanh số, bảng lương PT, materialized view~~ — xong 29/09/2026 |
 | 5 | Web cho hội viên (`/me`) |
 | 6 | Zalo OA theo từng phòng, outbox worker, chiến dịch chăm sóc |
 | 7 | Hạn mức gói SaaS, quản trị nền tảng, đối soát thu tiền thủ công |
@@ -537,8 +631,16 @@ Theo thứ tự, vì mỗi bước dựa vào bước trước:
 - **Thu tiền chưa phân bổ tự động qua nhiều đợt.** Thu 3 triệu khi đợt 1 còn thiếu
   1 triệu thì phải gọi hai lần, mỗi lần một `scheduleId`. Phân bổ tự động là
   quyết định nghiệp vụ (thu đợt gần nhất trước, hay đợt quá hạn trước?) — chưa chốt.
-- **Đối soát chạy trong test, chưa có lịch trên môi trường thật.** Bốn view đã có;
+- **Đối soát chạy trong test, chưa có lịch trên môi trường thật.** Tám view đã có;
   cần một job gọi chúng và báo động khi có dòng. Gắn cùng lúc với BullMQ.
+- **Làm mới báo cáo là NÚT BẤM, chưa phải job.** `refresh_reporting()` làm mới
+  cho mọi phòng tập cùng lúc (matview là một khối), nên hiện bị giới hạn 1 lần /
+  5 phút / phòng qua Redis. Đường đúng là job định kỳ.
+- **Chưa có màn bảng lương trên web.** API đủ (`xem` / `chốt` / `đánh dấu đã
+  chi`), web mới có màn báo cáo.
+- **Bảng lương chưa mở lại được sau khi chốt.** Chốt nhầm thì hiện phải sửa bằng
+  SQL. Cần thao tác `reopen` gỡ `payroll_line_id` khỏi các dòng hoa hồng — có
+  chủ đích chưa làm, vì nó là thao tác đảo ngược tiền và cần quy trình duyệt.
 - **Chưa có worker Zalo.** Khi làm: ghi `notification_outbox` **trong** transaction
   nghiệp vụ, gửi ở tiến trình khác. Gọi HTTP trong transaction thì mạng chậm sẽ
   giữ khoá trên `member_package` và kéo sập cả luồng điểm danh. Token OA xoay vòng

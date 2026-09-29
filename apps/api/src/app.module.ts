@@ -15,6 +15,7 @@ import { CommissionModule } from './commission/commission.module';
 import { SaleModule } from './sale/sale.module';
 import { BillingModule } from './billing/billing.module';
 import { AttendanceModule } from './attendance/attendance.module';
+import { ReportModule } from './report/report.module';
 import { HealthModule } from './health/health.module';
 
 @Module({
@@ -34,6 +35,7 @@ import { HealthModule } from './health/health.module';
     SaleModule,
     BillingModule,
     AttendanceModule,
+    ReportModule,
     HealthModule,
   ],
   providers: [

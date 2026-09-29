@@ -38,6 +38,10 @@ const GLOBAL_TABLES = new Set([
   'platform_admin',          // mặt phẳng nền tảng
   'platform_audit_log',      // mặt phẳng nền tảng
   'schema_migrations',       // của migration runner
+  // Mốc làm mới materialized view. Matview là MỘT KHỐI chung cho mọi phòng tập
+  // nên mốc làm mới cũng chung — không có gì để chia theo tenant. Bảng chỉ chứa
+  // một dòng (thời điểm + thời lượng), không có dữ liệu nghiệp vụ.
+  'reporting_refresh_log',
 ]);
 
 /**
@@ -115,6 +119,73 @@ describe('A. Cấu trúc: mọi bảng có tenant_id đều phải được RLS 
       `Bảng MỚI không có tenant_id. Gần như chắc chắn là quên cột — nếu thật sự\n` +
         `là bảng dùng chung thì thêm vào GLOBAL_TABLES kèm lý do:\n${laMat.join('\n')}`,
     ).toEqual([]);
+  });
+
+  it('KHÔNG materialized view nào được app_rw đọc trực tiếp', async () => {
+    // PostgreSQL KHÔNG CHO bật RLS trên materialized view:
+    //   ALTER MATERIALIZED VIEW ... ENABLE ROW LEVEL SECURITY
+    //   -> ERROR: This operation is not supported for materialized views.
+    //
+    // Đo hậu quả (29/09/2026): cấp SELECT matview cho app_rw rồi đặt
+    // app.tenant_id = Alpha, nó đọc được CẢ HAI phòng tập. Toàn bộ lớp cách ly
+    // bị vô hiệu ở đúng chỗ chứa số liệu tổng hợp.
+    //
+    // Nhóm A ở trên quét `relkind = 'r'` nên matview VÔ HÌNH với nó — ca này
+    // tồn tại để bịt đúng điểm mù đó. Cách đúng: REVOKE khỏi app_rw và lộ ra
+    // qua một view thường có mệnh đề tenant (xem migration 0012).
+    const { rows } = await admin.query<{ bang: string; quyen: string }>(`
+      SELECT c.relname AS bang, array_to_string(c.relacl, ',') AS quyen
+      FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+      WHERE n.nspname = 'public' AND c.relkind = 'm'
+        AND (has_table_privilege('app_rw', c.oid, 'SELECT')
+          OR has_table_privilege('app_auth', c.oid, 'SELECT'))`);
+
+    expect(
+      rows.map((r) => `${r.bang} (${r.quyen})`),
+      `Materialized view KHÔNG thể được RLS bảo vệ — cấp SELECT cho role của app\n` +
+        `là để lộ số liệu tổng hợp của MỌI phòng tập.\n` +
+        `Sửa: REVOKE ALL ON <matview> FROM app_rw; rồi tạo view bọc có mệnh đề\n` +
+        `tenant_id = NULLIF(current_setting('app.tenant_id', TRUE), '')::uuid`,
+    ).toEqual([]);
+  });
+
+  it('bộ nhận diện matview KHÔNG rỗng: một GRANT giả lập bị bắt', async () => {
+    // Test âm. GRANT trong PostgreSQL là thao tác có giao dịch nên rollback
+    // trả lại nguyên trạng. Không có ca này thì một truy vấn viết sai (luôn trả
+    // rỗng) cũng làm ca trên xanh, và điểm mù matview lại mở ra lần nữa.
+    await admin.query('BEGIN');
+    try {
+      await admin.query('GRANT SELECT ON mv_tenant_month TO app_rw');
+      const { rows } = await admin.query<{ bang: string }>(`
+        SELECT c.relname AS bang
+        FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+        WHERE n.nspname = 'public' AND c.relkind = 'm'
+          AND has_table_privilege('app_rw', c.oid, 'SELECT')`);
+      expect(rows.map((r) => r.bang)).toContain('mv_tenant_month');
+    } finally {
+      await admin.query('ROLLBACK');
+    }
+  });
+
+  it('mọi view bọc matview đều lọc theo tenant', async () => {
+    // Bọc mà quên mệnh đề thì còn tệ hơn không bọc: nhìn thì có vẻ an toàn.
+    const { rows } = await admin.query<{ viewname: string; def: string }>(`
+      SELECT v.viewname, v.definition AS def
+      FROM pg_views v
+      WHERE v.schemaname = 'public'
+        AND EXISTS (
+          SELECT 1 FROM pg_depend d
+          JOIN pg_rewrite r ON r.oid = d.objid
+          JOIN pg_class mv ON mv.oid = d.refobjid AND mv.relkind = 'm'
+          WHERE r.ev_class = (quote_ident(v.schemaname) || '.' || quote_ident(v.viewname))::regclass
+        )`);
+
+    expect(rows.length, 'Không tìm thấy view bọc nào — matview đang không được dùng?').toBeGreaterThan(0);
+
+    const thieu = rows
+      .filter((r) => !r.def.includes('app.tenant_id'))
+      .map((r) => r.viewname);
+    expect(thieu, `View bọc matview nhưng không lọc theo tenant`).toEqual([]);
   });
 
   it('tenant và identity có policy riêng (không lọt vòng lặp theo tenant_id)', async () => {

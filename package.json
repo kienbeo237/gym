@@ -12,7 +12,7 @@
     "db:migrate": "tsx db/migrate.ts up",
     "db:status": "tsx db/migrate.ts status",
     "db:seed": "tsx db/seed.ts",
-    "db:types": "kysely-codegen --dialect postgres --out-file packages/contracts/src/db.ts",
+    "db:types": "kysely-codegen --dialect postgres --out-file packages/contracts/src/db.ts && tsx db/patch-date-types.ts",
     "dev": "turbo run dev",
     "build": "turbo run build",
     "test": "turbo run test",

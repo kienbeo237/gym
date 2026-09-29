@@ -29,6 +29,7 @@ const VIEWS = [
   ['v_revenue_drift', 'Buổi đã trừ không có đúng một dòng doanh thu'],
   ['v_teach_commission_drift', 'Buổi đã dạy không có đúng một dòng hoa hồng dạy'],
   ['v_revenue_over_contract', 'Doanh thu ghi nhận vượt quá giá bán của hợp đồng'],
+  ['v_payroll_drift', 'Con số đã chốt trên bảng lương lệch khỏi hoa hồng gắn vào nó'],
 ] as const;
 
 let db: Client;

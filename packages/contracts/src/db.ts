@@ -27,6 +27,13 @@ export type Numeric = ColumnType<string, number | string, number | string>;
 
 export type Timestamp = ColumnType<Date, Date | string, Date | string>;
 
+/**
+ * Cột `date` của Postgres: một ngày trên tờ lịch, KHÔNG phải một thời điểm.
+ * Ứng dụng đặt setTypeParser để nó giữ nguyên chuỗi 'YYYY-MM-DD' — đừng gọi
+ * `new Date(...)` lên nó rồi `.toISOString()`, sẽ lùi một ngày ở múi giờ +07.
+ */
+export type DateString = ColumnType<string, string, string>;
+
 export interface AuditLog {
   action: string;
   actor_id: string | null;
@@ -108,7 +115,8 @@ export interface CommissionEntry {
   member_package_id: string;
   paid_out_at: Timestamp | null;
   payment_id: string | null;
-  period_month: Timestamp;
+  payroll_line_id: string | null;
+  period_month: DateString;
   policy_snapshot: Json;
   tenant_id: string;
   trainer_id: string;
@@ -116,8 +124,8 @@ export interface CommissionEntry {
 
 export interface CommissionPolicy {
   created_at: Generated<Timestamp>;
-  effective_from: Timestamp;
-  effective_to: Timestamp | null;
+  effective_from: DateString;
+  effective_to: DateString | null;
   id: Generated<string>;
   package_template_id: string | null;
   sale_pct: Generated<Numeric>;
@@ -199,7 +207,7 @@ export interface Member {
   avatar_key: string | null;
   code: string;
   created_at: Generated<Timestamp>;
-  dob: Timestamp | null;
+  dob: DateString | null;
   gender: string | null;
   id: Generated<string>;
   identity_id: string;
@@ -217,7 +225,7 @@ export interface MemberPackage {
   created_at: Generated<Timestamp>;
   created_by: string | null;
   discount: Generated<Int8>;
-  expires_on: Timestamp;
+  expires_on: DateString;
   frozen_days: Generated<number>;
   id: Generated<string>;
   member_id: string;
@@ -235,7 +243,7 @@ export interface MemberPackage {
    */
   sessions_used: Generated<number>;
   sold_by_id: string | null;
-  starts_on: Timestamp;
+  starts_on: DateString;
   status: Generated<string>;
   template_id: string;
   tenant_id: string;
@@ -275,8 +283,8 @@ export interface OtpChallenge {
 export interface PackageFreeze {
   created_at: Generated<Timestamp>;
   created_by: string | null;
-  frozen_from: Timestamp;
-  frozen_to: Timestamp | null;
+  frozen_from: DateString;
+  frozen_to: DateString | null;
   id: Generated<string>;
   member_package_id: string;
   reason: string | null;
@@ -321,10 +329,37 @@ export interface Payment {
 
 export interface PaymentSchedule {
   amount: Int8;
-  due_date: Timestamp;
+  due_date: DateString;
   id: Generated<string>;
   invoice_id: string;
   seq: number;
+  status: Generated<string>;
+  tenant_id: string;
+}
+
+export interface PayrollLine {
+  adjustment: Generated<Int8>;
+  adjustment_note: string | null;
+  base_salary: Int8;
+  commission_sale: Generated<Int8>;
+  commission_teach: Generated<Int8>;
+  id: Generated<string>;
+  run_id: string;
+  sessions_taught: Generated<number>;
+  tenant_id: string;
+  total: Generated<Int8 | null>;
+  trainer_id: string;
+}
+
+export interface PayrollRun {
+  closed_at: Timestamp | null;
+  closed_by: string | null;
+  created_at: Generated<Timestamp>;
+  id: Generated<string>;
+  note: string | null;
+  paid_at: Timestamp | null;
+  paid_by: string | null;
+  period_month: DateString;
   status: Generated<string>;
   tenant_id: string;
 }
@@ -370,6 +405,12 @@ export interface RefreshToken {
   tenant_id: string | null;
   token_hash: string;
   user_agent: string | null;
+}
+
+export interface ReportingRefreshLog {
+  duration_ms: number;
+  id: Generated<Int8>;
+  refreshed_at: Generated<Timestamp>;
 }
 
 export interface RevenueEntry {
@@ -423,8 +464,8 @@ export interface TenantBillingRecord {
   created_at: Generated<Timestamp>;
   id: Generated<string>;
   note: string | null;
-  period_end: Timestamp;
-  period_start: Timestamp;
+  period_end: DateString;
+  period_start: DateString;
   plan_code: string;
   status: Generated<string>;
   tenant_id: string;
@@ -433,7 +474,7 @@ export interface TenantBillingRecord {
 
 export interface TenantMessageUsage {
   channel: string;
-  period_month: Timestamp;
+  period_month: DateString;
   sent_count: Generated<number>;
   tenant_id: string;
 }
@@ -449,8 +490,8 @@ export interface TenantPolicy {
 }
 
 export interface TenantSubscription {
-  current_period_end: Timestamp | null;
-  current_period_start: Timestamp | null;
+  current_period_end: DateString | null;
+  current_period_start: DateString | null;
   plan_code: string;
   status: Generated<string>;
   tenant_id: string;
@@ -495,10 +536,10 @@ export interface Trainer {
   bio: string | null;
   code: string;
   created_at: Generated<Timestamp>;
-  hired_on: Timestamp | null;
+  hired_on: DateString | null;
   id: Generated<string>;
   identity_id: string;
-  left_on: Timestamp | null;
+  left_on: DateString | null;
   level: string | null;
   status: Generated<string>;
   tenant_id: string;
@@ -531,6 +572,29 @@ export interface VInvoicePaidDrift {
   invoice_id: string | null;
   ledger_paid: Numeric | null;
   tenant_id: string | null;
+}
+
+export interface VPackageMonth {
+  discount_amount: Int8 | null;
+  gross_amount: Int8 | null;
+  net_amount: Int8 | null;
+  period_month: DateString | null;
+  sessions_sold: number | null;
+  sessions_used: number | null;
+  sold_count: number | null;
+  template_id: string | null;
+  tenant_id: string | null;
+}
+
+export interface VPayrollDrift {
+  chot_ban: Int8 | null;
+  chot_day: Int8 | null;
+  payroll_line_id: string | null;
+  run_id: string | null;
+  tenant_id: string | null;
+  thuc_ban: Numeric | null;
+  thuc_day: Numeric | null;
+  trainer_id: string | null;
 }
 
 export interface VRevenueDrift {
@@ -577,6 +641,30 @@ export interface VTeachCommissionDrift {
   trainer_id: string | null;
 }
 
+export interface VTenantMonth {
+  cash_in: Int8 | null;
+  cash_out: Int8 | null;
+  gross_sales: Int8 | null;
+  new_members: number | null;
+  packages_sold: number | null;
+  period_month: DateString | null;
+  revenue_recognized: Int8 | null;
+  sessions_deducted: number | null;
+  sessions_taught: number | null;
+  tenant_id: string | null;
+}
+
+export interface VTrainerMonth {
+  commission_sale: Int8 | null;
+  commission_teach: Int8 | null;
+  period_month: DateString | null;
+  revenue_recognized: Int8 | null;
+  sessions_deducted: number | null;
+  sessions_taught: number | null;
+  tenant_id: string | null;
+  trainer_id: string | null;
+}
+
 export interface DB {
   audit_log: AuditLog;
   booking: Booking;
@@ -598,10 +686,13 @@ export interface DB {
   package_template: PackageTemplate;
   payment: Payment;
   payment_schedule: PaymentSchedule;
+  payroll_line: PayrollLine;
+  payroll_run: PayrollRun;
   plan: Plan;
   platform_admin: PlatformAdmin;
   platform_audit_log: PlatformAuditLog;
   refresh_token: RefreshToken;
+  reporting_refresh_log: ReportingRefreshLog;
   revenue_entry: RevenueEntry;
   schema_migrations: SchemaMigrations;
   session_ledger: SessionLedger;
@@ -617,9 +708,13 @@ export interface DB {
   trainer_availability: TrainerAvailability;
   v_commission_needs_policy: VCommissionNeedsPolicy;
   v_invoice_paid_drift: VInvoicePaidDrift;
+  v_package_month: VPackageMonth;
+  v_payroll_drift: VPayrollDrift;
   v_revenue_drift: VRevenueDrift;
   v_revenue_over_contract: VRevenueOverContract;
   v_sale_commission_drift: VSaleCommissionDrift;
   v_session_balance_drift: VSessionBalanceDrift;
   v_teach_commission_drift: VTeachCommissionDrift;
+  v_tenant_month: VTenantMonth;
+  v_trainer_month: VTrainerMonth;
 }

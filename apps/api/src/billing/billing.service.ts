@@ -38,7 +38,7 @@ export class BillingService {
                 .select('ps.id')
                 .whereRef('ps.invoice_id', '=', 'inv.id')
                 .where('ps.status', 'in', ['DUE', 'OVERDUE'])
-                .where('ps.due_date', '<', sql<Date>`current_date`),
+                .where('ps.due_date', '<', sql<string>`current_date`),
             ),
           ),
         );
@@ -58,7 +58,7 @@ export class BillingService {
             .select((e) => e.fn.countAll<string>().as('c'))
             .whereRef('ps.invoice_id', '=', 'inv.id')
             .where('ps.status', 'in', ['DUE', 'OVERDUE'])
-            .where('ps.due_date', '<', sql<Date>`current_date`)
+            .where('ps.due_date', '<', sql<string>`current_date`)
             .as('overdueCount'),
           eb
             .selectFrom('payment_schedule as ps')

@@ -16,6 +16,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     { href: '/trainers', label: 'Huấn luyện viên' },
     { href: '/packages', label: 'Gói tập' },
     { href: '/invoices', label: 'Hoá đơn' },
+    { href: '/reports', label: 'Báo cáo' },
   ];
 
   return (
