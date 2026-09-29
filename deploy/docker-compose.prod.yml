@@ -1,0 +1,125 @@
+# Production stack — chạy trên máy chủ trong ~/gym, do deploy/deploy.sh điều khiển.
+#
+# Mọi biến ${...} đọc từ ~/gym/.env: deploy.sh sinh bí mật NGẪU NHIÊN lần đầu
+# (không bao giờ ghi đè) và cập nhật DOMAIN / IMAGE_* mỗi lần deploy. Cấu hình
+# S3 (S3_*) do người vận hành điền tay. Bí mật chỉ nằm trên máy chủ, không nằm
+# trong repo hay GitHub.
+#
+# Tệp lưu ở S3 BÊN NGOÀI (CMC Cloud) — trình duyệt PUT thẳng lên đó qua URL ký
+# sẵn, nên bucket phải bật CORS cho https://DOMAIN.
+#
+# Chỉ API và web mở cổng, và chỉ trên 127.0.0.1 — nginx của máy chủ đứng trước
+# (xem deploy/nginx/gym.conf). Postgres/Redis không mở cổng ra ngoài.
+name: gym-pt
+
+x-logging: &logging
+  driver: json-file
+  options: { max-size: '10m', max-file: '3' }
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    logging: *logging
+    environment:
+      POSTGRES_USER: pt_migrator
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?}
+      # Mật khẩu ba role ứng dụng, dùng bởi postgres-init/01-roles.sh (chỉ chạy
+      # khi volume còn trống).
+      APP_DB_PASSWORD: ${APP_DB_PASSWORD:?}
+      POSTGRES_DB: pt
+      TZ: Asia/Ho_Chi_Minh
+    command: [postgres, -c, timezone=Asia/Ho_Chi_Minh, -c, max_connections=200]
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./postgres-init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U pt_migrator -d pt']
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    logging: *logging
+    command: redis-server --requirepass ${REDIS_PASSWORD:?} --appendonly yes
+    volumes: [redisdata:/data]
+    healthcheck:
+      test: ['CMD-SHELL', 'redis-cli -a "$$REDIS_PASSWORD" --no-auth-warning ping | grep -q PONG']
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+
+
+  api:
+    image: ${IMAGE_PREFIX:?}-api:${IMAGE_TAG:?}
+    restart: unless-stopped
+    logging: *logging
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+    environment:
+      NODE_ENV: production
+      API_PORT: '4000'
+      # API chạy bằng role BỊ RLS áp. Không bao giờ trỏ về pt_migrator.
+      DATABASE_URL_APP: postgres://app_rw:${APP_DB_PASSWORD}@postgres:5432/pt
+      DATABASE_URL_AUTH: postgres://app_auth:${APP_DB_PASSWORD}@postgres:5432/pt
+      DATABASE_URL_PLATFORM: postgres://app_platform:${APP_DB_PASSWORD}@postgres:5432/pt
+      REDIS_HOST: redis
+      REDIS_PORT: '6379'
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+      # Endpoint CÔNG KHAI: URL ký sẵn được ký theo host này và trình duyệt gọi
+      # thẳng tới nó.
+      S3_ENDPOINT: ${S3_ENDPOINT:?Điền S3_ENDPOINT trong .env}
+      S3_REGION: ${S3_REGION:?}
+      S3_BUCKET: ${S3_BUCKET:?}
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY:?}
+      S3_SECRET_KEY: ${S3_SECRET_KEY:?}
+      S3_FORCE_PATH_STYLE: ${S3_FORCE_PATH_STYLE:-true}
+      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:?}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:?}
+      JWT_ACCESS_TTL_SECONDS: '900'
+      JWT_REFRESH_TTL_DAYS: '30'
+      TENANT_SECRET_KEY: ${TENANT_SECRET_KEY:?}
+      APP_BASE_DOMAIN: ${DOMAIN}
+      WEB_ORIGIN: https://${DOMAIN}
+      DEFAULT_TIMEZONE: Asia/Ho_Chi_Minh
+    ports: ['127.0.0.1:${API_HOST_PORT:-4210}:4000']
+
+  web:
+    image: ${IMAGE_PREFIX:?}-web:${IMAGE_TAG:?}
+    restart: unless-stopped
+    logging: *logging
+    depends_on:
+      api: { condition: service_healthy }
+    environment:
+      NODE_ENV: production
+      # Server Component và /api/proxy gọi API qua mạng nội bộ của compose.
+      API_INTERNAL_URL: http://api:4000/api
+    ports: ['127.0.0.1:${WEB_HOST_PORT:-3210}:3000']
+
+  # ---- Tác vụ một lần: `docker compose run --rm migrate|seed` ----------------
+  migrate:
+    image: ${IMAGE_PREFIX:?}-tools:${IMAGE_TAG:?}
+    profiles: [tools]
+    depends_on:
+      postgres: { condition: service_healthy }
+    environment:
+      DATABASE_URL: postgres://pt_migrator:${DB_PASSWORD}@postgres:5432/pt
+    command: ['./node_modules/.bin/tsx', 'db/migrate.ts', 'up']
+
+  seed:
+    image: ${IMAGE_PREFIX:?}-tools:${IMAGE_TAG:?}
+    profiles: [tools]
+    depends_on:
+      postgres: { condition: service_healthy }
+    environment:
+      DATABASE_URL_PLATFORM: postgres://app_platform:${APP_DB_PASSWORD}@postgres:5432/pt
+    command: ['./node_modules/.bin/tsx', 'db/seed.ts']
+
+volumes:
+  pgdata:
+  redisdata:

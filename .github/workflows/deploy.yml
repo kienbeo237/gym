@@ -1,0 +1,126 @@
+name: Deploy
+
+# Chỉ deploy commit đã qua CI: chạy khi workflow CI trên main kết thúc XANH.
+# Chạy tay (workflow_dispatch) để deploy lại hoặc nạp dữ liệu mẫu lần đầu.
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      seed:
+        description: 'Nạp dữ liệu mẫu (2 phòng tập, mật khẩu công khai Matkhau@123) — chỉ dùng cho bản demo'
+        type: boolean
+        default: false
+
+# Hai lần deploy chồng nhau là hai lần migrate chồng nhau. Xếp hàng, không huỷ.
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+
+jobs:
+  build:
+    if: >-
+      (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success') ||
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: true
+      matrix:
+        target: [api, web, tools]
+    steps:
+      - uses: actions/checkout@v4
+        with: { ref: '${{ env.SHA }}' }
+
+      # GHCR bắt buộc tên image chữ thường.
+      - name: Tên image
+        run: echo "IMAGE_PREFIX=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_ENV"
+
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: ${{ matrix.target }}
+          push: true
+          tags: |
+            ${{ env.IMAGE_PREFIX }}-${{ matrix.target }}:${{ env.SHA }}
+            ${{ env.IMAGE_PREFIX }}-${{ matrix.target }}:latest
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ env.SHA }}
+          cache-from: type=gha,scope=${{ matrix.target }}
+          cache-to: type=gha,scope=${{ matrix.target }},mode=max
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+      url: https://${{ vars.DEPLOY_DOMAIN }}
+    env:
+      DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+      DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+      DEPLOY_PATH: ${{ vars.DEPLOY_PATH || 'gym' }}
+      DOMAIN: ${{ vars.DEPLOY_DOMAIN }}
+      SEED: ${{ github.event_name == 'workflow_dispatch' && inputs.seed && '1' || '0' }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: '${{ env.SHA }}'
+          sparse-checkout: |
+            deploy
+            docker/postgres/init
+
+      - name: Kiểm cấu hình
+        run: |
+          for v in DEPLOY_HOST DEPLOY_USER DOMAIN; do
+            [ -n "${!v}" ] || { echo "::error::Thiếu $v (xem deploy/README.md)"; exit 1; }
+          done
+
+      - name: Cấu hình SSH
+        env:
+          SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/id_deploy && chmod 600 ~/.ssh/id_deploy
+          # Ghim khoá máy chủ: không có nó thì SSH tin bất kỳ máy nào trả lời IP này.
+          printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
+          cat >> ~/.ssh/config <<EOF
+          Host deploy-target
+            HostName $DEPLOY_HOST
+            User $DEPLOY_USER
+            IdentityFile ~/.ssh/id_deploy
+            IdentitiesOnly yes
+            StrictHostKeyChecking yes
+            ServerAliveInterval 30
+          EOF
+
+      - name: Chép tệp deploy lên máy chủ
+        run: |
+          ssh deploy-target "mkdir -p '$DEPLOY_PATH/postgres-init'"
+          scp -q deploy/docker-compose.prod.yml deploy/deploy.sh "deploy-target:$DEPLOY_PATH/"
+          scp -q docker/postgres/init/01-roles.sh "deploy-target:$DEPLOY_PATH/postgres-init/"
+          ssh deploy-target "chmod +x '$DEPLOY_PATH/deploy.sh' '$DEPLOY_PATH/postgres-init/01-roles.sh'"
+
+      - name: Deploy
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Token đi qua stdin, không nằm trong dòng lệnh bên máy chủ.
+          printf '%s\n' "$GHCR_TOKEN" | ssh deploy-target \
+            "cd '$DEPLOY_PATH' && IMAGE_TAG='$SHA' IMAGE_PREFIX='ghcr.io/${GITHUB_REPOSITORY,,}' DOMAIN='$DOMAIN' GHCR_USER='$GITHUB_ACTOR' SEED='$SEED' ./deploy.sh"
