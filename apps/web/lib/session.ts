@@ -12,17 +12,28 @@ import { redirect } from 'next/navigation';
 export const COOKIE_ACCESS = 'pt_at';
 export const COOKIE_REFRESH = 'pt_rt';
 export const COOKIE_TENANT = 'pt_tenant';
+/**
+ * Vai trò, CHỈ để điều hướng (hội viên vào /me, nhân viên vào /members).
+ * KHÔNG dùng để phân quyền: cookie do máy chủ Next đặt nhưng phân quyền thật
+ * nằm ở claim trong access token mà API tự kiểm.
+ */
+export const COOKIE_ROLES = 'pt_roles';
 
 export type Session = {
   accessToken: string;
   tenantName: string;
+  roles: string[];
 };
 
 export async function getSession(): Promise<Session | null> {
   const jar = await cookies();
   const accessToken = jar.get(COOKIE_ACCESS)?.value;
   if (!accessToken) return null;
-  return { accessToken, tenantName: jar.get(COOKIE_TENANT)?.value ?? '' };
+  return {
+    accessToken,
+    tenantName: jar.get(COOKIE_TENANT)?.value ?? '',
+    roles: (jar.get(COOKIE_ROLES)?.value ?? '').split(',').filter(Boolean),
+  };
 }
 
 export async function requireSession(): Promise<Session> {

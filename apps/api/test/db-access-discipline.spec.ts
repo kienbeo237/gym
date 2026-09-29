@@ -113,6 +113,35 @@ describe('Kỷ luật truy cập CSDL', () => {
     ).toEqual([]);
   });
 
+  it('phép kiểm "chỉ là hội viên" chỉ được khai ở MỘT nơi', () => {
+    // RLS cách ly giữa các PHÒNG TẬP, không cách ly giữa các HỘI VIÊN trong
+    // cùng phòng. Phép kiểm đó nằm ở `common/member-scope.ts`.
+    //
+    // Rủi ro thật: ai đó viết lại `roles.includes('MEMBER')` ở service khác,
+    // hơi khác một chút — ví dụ quên rằng một người vừa là PT vừa là hội viên
+    // thì KHÔNG bị thu hẹp phạm vi. Hai phép kiểm lệch nhau là một lỗ hổng
+    // không ai thấy, vì cả hai đều "trông đúng".
+    const DUOC_KHAI = ['common/member-scope.ts'];
+    const viPham: string[] = [];
+
+    for (const f of FILES) {
+      if (DUOC_KHAI.includes(f.rel)) continue;
+      for (const { no, text } of codeLines(f.abs)) {
+        // Bắt mọi cách tự kiểm vai trò MEMBER ngoài member-scope.ts.
+        if (/roles[^\n]*['"`]MEMBER['"`]/.test(text) && !text.includes('@Roles')) {
+          viPham.push(`${f.rel}:${no}  ${text.trim()}`);
+        }
+      }
+    }
+
+    expect(
+      viPham,
+      `Kiểm vai trò MEMBER phải đi qua common/member-scope.ts\n` +
+        `(chiLaHoiVien / epPhamViHoiVien / assertChinhMinh). Khai lại ở chỗ khác\n` +
+        `là hai phép kiểm sẽ trôi khỏi nhau:\n${viPham.join('\n')}`,
+    ).toEqual([]);
+  });
+
   it('bộ nhận diện KHÔNG rỗng: một vi phạm giả lập bị bắt', () => {
     // Test âm. Dùng chuỗi GHÉP để chính tệp này không tự báo mình — nó nằm
     // ngoài src/ nên không bị quét, nhưng giữ thói quen đó cho chắc.

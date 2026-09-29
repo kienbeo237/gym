@@ -1,4 +1,10 @@
-import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  Injectable,
+  Logger,
+  NotFoundException,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import {
   DeleteObjectCommand,
@@ -18,9 +24,19 @@ import {
   type UploadUrlResponse,
 } from '@pt/contracts';
 import { TenantDb } from '../common/tenant-db.service';
+import { chiLaHoiVien } from '../common/member-scope';
 import { requireContext } from '../common/tenant-context';
 
 const UPLOAD_TTL = 300; // 5 phút để tải xong
+
+/**
+ * Tệp RIÊNG của một hội viên. Người chỉ có vai trò MEMBER không được tải lên
+ * hay tải về tệp của người khác — kể cả trong cùng phòng tập.
+ *
+ * Hoá đơn và hợp đồng KHÔNG nằm ở đây có chủ đích: chúng gắn với giao dịch và
+ * nhân viên quầy phải xem được; đường riêng của hội viên đi qua /me/invoices.
+ */
+const LOAI_TEP_RIENG_TU = new Set<FileOwnerType>(['PROGRESS_PHOTO', 'MEMBER_AVATAR']);
 
 /**
  * Tệp đi THẲNG từ trình duyệt lên S3, API chỉ ký URL.
@@ -81,6 +97,13 @@ export class StorageService {
     const ctx = requireContext();
     const rule = FILE_RULES[dto.ownerType];
 
+    // `ownerId` đến từ client. Đo 29/09/2026 trước khi vá: một hội viên xin
+    // được URL tải ảnh tiến độ gắn cho ownerId của NGƯỜI KHÁC — và ảnh tiến độ
+    // cơ thể là dữ liệu nhạy cảm nhất trong hệ thống.
+    const ownerId = LOAI_TEP_RIENG_TU.has(dto.ownerType)
+      ? this.chuSoHuuHopLe(dto.ownerId)
+      : (dto.ownerId ?? null);
+
     // Kiểm ở đây là để từ chối SỚM; con số thật vẫn đọc lại ở bước xác nhận.
     if (!rule.mimes.includes(dto.mime)) {
       throw new BadRequestException({
@@ -107,7 +130,7 @@ export class StorageService {
           mime: dto.mime,
           size_bytes: null,
           owner_type: dto.ownerType,
-          owner_id: dto.ownerId ?? null,
+          owner_id: ownerId,
           uploaded_by: ctx.identityId,
           status: 'PENDING',
         })
@@ -197,11 +220,12 @@ export class StorageService {
     const file = await this.tdb.run(async (tx) =>
       tx
         .selectFrom('file_object')
-        .select(['object_key', 'owner_type', 'status'])
+        .select(['object_key', 'owner_type', 'owner_id', 'status'])
         .where('id', '=', fileId)
         .executeTakeFirst(),
     );
     if (!file || file.status !== 'CONFIRMED') throw new NotFoundException('FILE_NOT_FOUND');
+    this.assertXemDuoc(file.owner_type, file.owner_id);
 
     const ttl = FILE_RULES[file.owner_type as FileOwnerType].downloadTtlSeconds;
     const url = await getSignedUrl(
@@ -241,4 +265,43 @@ export class StorageService {
     }
     return { deleted };
   }
+
+  /**
+   * Chủ sở hữu hợp lệ của một tệp riêng tư.
+   *
+   * Hội viên: luôn là chính họ, bất kể client gửi gì lên.
+   * Nhân viên: phải khai tường minh — lễ tân chụp ảnh hộ khách là chuyện thật,
+   * nhưng phải nói rõ chụp cho ai.
+   */
+  private chuSoHuuHopLe(yeuCau: string | undefined): string {
+    const ctx = requireContext();
+    if (chiLaHoiVien(ctx)) {
+      if (!ctx.memberId) {
+        throw new ForbiddenException({
+          code: 'NO_MEMBER_PROFILE',
+          message: 'Tài khoản chưa gắn hồ sơ hội viên tại phòng tập này',
+        });
+      }
+      return ctx.memberId;
+    }
+    if (!yeuCau) {
+      throw new BadRequestException({
+        code: 'OWNER_REQUIRED',
+        message: 'Phải chọn hội viên cho loại tệp này',
+      });
+    }
+    return yeuCau;
+  }
+
+  /** Chặn hội viên tải về tệp riêng tư của người khác. */
+  private assertXemDuoc(ownerType: string, ownerId: string | null): void {
+    const ctx = requireContext();
+    if (!LOAI_TEP_RIENG_TU.has(ownerType as FileOwnerType)) return;
+    if (!chiLaHoiVien(ctx)) return;
+    if (!ownerId || ownerId !== ctx.memberId) {
+      // 404 chứ không 403: trả 403 là xác nhận tệp đó tồn tại.
+      throw new NotFoundException('FILE_NOT_FOUND');
+    }
+  }
+
 }

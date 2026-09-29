@@ -57,6 +57,7 @@ export default function LoginPage() {
         accessToken: s.accessToken,
         refreshToken: s.refreshToken,
         tenantName: s.tenant.name,
+        roles: s.tenant.roles,
         expiresIn: s.expiresIn,
       }),
     });

@@ -36,3 +36,4 @@ export * from './sale.js';
 export * from './billing.js';
 export * from './booking.js';
 export * from './report.js';
+export * from './me.js';

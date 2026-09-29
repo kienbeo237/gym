@@ -11,6 +11,7 @@ import type {
 import { TenantDb, type Tx } from '../common/tenant-db.service';
 import { requireContext } from '../common/tenant-context';
 import { SessionConsumptionService } from './session-consumption.service';
+import { assertChinhMinh, chiLaHoiVien, epPhamViHoiVien } from '../common/member-scope';
 
 const TZ = 'Asia/Ho_Chi_Minh';
 
@@ -25,6 +26,12 @@ export class BookingService {
   ) {}
 
   async list(q: ListBookingQuery): Promise<BookingItem[]> {
+    // RLS cách ly giữa các PHÒNG TẬP, không cách ly giữa các HỘI VIÊN trong
+    // cùng phòng. Đo 29/09/2026 trước khi vá: một hội viên gọi endpoint này
+    // nhận về 13 buổi tập kèm HỌ TÊN, MÃ HỢP ĐỒNG và SỐ BUỔI CÒN LẠI của hai
+    // người khác. Nhân viên thì vẫn nhìn cả phòng.
+    const memberId = epPhamViHoiVien(q.memberId);
+
     return this.tdb.run(async (tx) => {
       const rows = await tx
         .selectFrom('booking as b')
@@ -48,7 +55,7 @@ export class BookingService {
         .where(sql<boolean>`(b.starts_at AT TIME ZONE ${TZ})::date >= ${q.from}::date`)
         .where(sql<boolean>`(b.starts_at AT TIME ZONE ${TZ})::date <= ${q.to}::date`)
         .$if(!!q.trainerId, (qb) => qb.where('b.trainer_id', '=', q.trainerId!))
-        .$if(!!q.memberId, (qb) => qb.where('b.member_id', '=', q.memberId!))
+        .$if(!!memberId, (qb) => qb.where('b.member_id', '=', memberId!))
         .$if(!!q.status, (qb) => qb.where('b.status', '=', q.status!))
         .orderBy('b.starts_at')
         .execute();
@@ -214,8 +221,14 @@ export class BookingService {
       // Hội viên chỉ huỷ được buổi của CHÍNH MÌNH. Vai trò MEMBER đã bị chặn ở
       // controller cho đường của nhân viên, nhưng đường tự huỷ thì phải kiểm
       // ở đây — token mang memberId, đường dẫn mang bookingId, hai thứ khác nhau.
-      if (ctx.roles.includes('MEMBER') && !ctx.roles.some((r) => r !== 'MEMBER')) {
-        if (b.member_id !== ctx.memberId) throw new ForbiddenException('NOT_YOUR_BOOKING');
+      //
+      // Dùng `chiLaHoiVien` thay vì tự viết lại điều kiện: bản cũ ở đây là
+      // `!roles.some(r => r !== 'MEMBER')` ("không có vai trò nào khác"), còn
+      // helper hỏi "không có vai trò NHÂN VIÊN nào". Hai câu này trùng nhau với
+      // 5 vai trò hiện có nhưng sẽ tách ra ngay khi thêm vai trò thứ sáu — và
+      // khi tách thì không gì báo.
+      if (chiLaHoiVien(ctx)) {
+        assertChinhMinh(b.member_id);
         if (dto.by !== 'MEMBER') {
           throw new ForbiddenException({
             code: 'CANNOT_CANCEL_AS_STAFF',

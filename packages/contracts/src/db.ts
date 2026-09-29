@@ -251,6 +251,20 @@ export interface MemberPackage {
   updated_at: Generated<Timestamp>;
 }
 
+export interface MemberProgress {
+  body_fat_pm: number | null;
+  created_at: Generated<Timestamp>;
+  created_by: string | null;
+  id: Generated<string>;
+  member_id: string;
+  muscle_hg: number | null;
+  note: string | null;
+  photo_file_id: string | null;
+  recorded_on: DateString;
+  tenant_id: string;
+  weight_hg: number | null;
+}
+
 export interface NotificationOutbox {
   attempts: Generated<number>;
   channel: string;
@@ -680,6 +694,7 @@ export interface DB {
   invoice_item: InvoiceItem;
   member: Member;
   member_package: MemberPackage;
+  member_progress: MemberProgress;
   notification_outbox: NotificationOutbox;
   otp_challenge: OtpChallenge;
   package_freeze: PackageFreeze;

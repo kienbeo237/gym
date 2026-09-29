@@ -3,12 +3,13 @@
 PostgreSQL · NestJS · Next.js · S3 · Redis. Một cài đặt phục vụ nhiều phòng tập,
 cách ly dữ liệu ở tầng cơ sở dữ liệu.
 
-**Trạng thái: Phase 0 → 4 xong.**
+**Trạng thái: Phase 0 → 5 xong.**
 Phase 0 — nền multi-tenant, xác thực hai bước, lát cắt hội viên, cổng gác tự động.
 Phase 1 — đăng nhập OTP, huấn luyện viên (khung giờ & hoa hồng), gói tập, tải tệp S3.
 Phase 2 — bán gói, hoá đơn trả góp, thu/hoàn tiền, hoa hồng bán hàng, đối soát.
 Phase 3 — lịch tập, điểm danh QR, chính sách huỷ/vắng, doanh thu ghi nhận, hoa hồng dạy.
 Phase 4 — báo cáo (materialized view), bảng lương huấn luyện viên.
+Phase 5 — app hội viên: tổng quan, lịch, lịch sử sổ cái, hoá đơn, tiến độ, điểm danh QR.
 Xem [Còn phải làm](#còn-phải-làm).
 
 ---
@@ -98,7 +99,7 @@ trao transaction cho lời gọi. Service nghiệp vụ **không được** tiê
 ### Lớp 4 — Bốn cổng gác tự động
 
 ```bash
-pnpm --filter @pt/api test     # 45 phép kiểm
+pnpm --filter @pt/api test     # 46 phép kiểm
 ```
 
 | Nhóm | Bắt lớp lỗi |
@@ -111,6 +112,7 @@ pnpm --filter @pt/api test     # 45 phép kiểm
 | Khoá Redis | khoá cache thiếu tiền tố `t:<tenantId>:` — rò dữ liệu qua đường cache |
 | Đối soát | 8 view: số dư buổi, tiền đã thu, doanh thu, hoa hồng bán/dạy, bảng lương |
 | Matview | materialized view bị cấp quyền cho role của app — RLS **không** bảo vệ được chúng |
+| Phạm vi hội viên | phép kiểm "chỉ là hội viên" bị viết lại ở nơi khác thay vì dùng chung |
 
 Bốn nhóm có **test âm** chống tautology: chúng tự tạo một vi phạm giả lập và đòi
 bộ nhận diện bắt được. Không có test âm thì một truy vấn luôn trả rỗng cũng làm
@@ -286,6 +288,82 @@ Cái thứ hai nguy hiểm hơn hẳn — nó vẫn ra một ngày **hợp lệ*
 đóng tiền, ngày hết hạn gói, ngày hiệu lực chính sách hoa hồng đều là cột `date`.
 Đã gặp thật ở `nextDueDate`. Cách chữa: `types.setTypeParser(DATE, v => v)` —
 giữ nguyên chuỗi `YYYY-MM-DD`, không có chỗ cho múi giờ chen vào.
+
+### ⚠️ RLS cách ly PHÒNG TẬP, không cách ly HỘI VIÊN
+
+Khoảng trống này là thứ mà phase 5 (app hội viên) biến thành lỗ hổng thật. Hai
+hội viên cùng phòng có mọi dòng mang cùng `tenant_id`, nên RLS cho qua hết.
+
+Đo 29/09/2026 **trước khi vá**, bằng một tài khoản hội viên thật:
+
+| Đường | Kết quả |
+| --- | --- |
+| `GET /bookings` | 13 buổi, gồm **họ tên, mã hợp đồng, số buổi còn lại** của 2 người khác |
+| `POST /files/upload-url` | nhận `ownerId` thẳng từ client → gắn được ảnh tiến độ cho người khác |
+| `GET /files/:id/url` | tải được ảnh tiến độ cơ thể của hội viên khác |
+| `POST /me/checkin` | quét mã QR của người khác vẫn trả 201 |
+
+Quy tắc, khai ở **một chỗ** (`common/member-scope.ts`): *người chỉ có vai trò
+MEMBER thì mọi truy vấn bị ép về chính họ*. Nhân viên thì không — họ cần nhìn cả
+phòng tập.
+
+Rải `if (roles.includes('MEMBER'))` khắp service là chắc chắn có chỗ quên, và
+chỗ quên không báo lỗi gì. Cổng gác mới cấm mọi cách tự kiểm vai trò MEMBER ngoài
+tệp đó — và nó **đã bắt được** một bản sao tôi viết ở phase 3, với điều kiện diễn
+đạt hơi khác (`!roles.some(r => r !== 'MEMBER')` thay vì "không có vai trò nhân
+viên nào"). Hai câu trùng nhau với 5 vai trò hiện có nhưng tách ra ngay khi thêm
+vai trò thứ sáu.
+
+### Thứ tự phép kiểm quan trọng ngang nội dung phép kiểm
+
+Lỗi điểm danh chéo có **hai tầng**, và tầng thứ hai chỉ lộ ra sau khi vá tầng thứ
+nhất:
+
+1. thiếu hẳn phép kiểm "đúng người đang xác nhận" — mã QR chứng minh *huấn luyện
+   viên đã mở buổi*, nó không chứng minh *ai đang quét*
+2. thêm phép kiểm rồi nhưng đặt **sau** nhánh trả về idempotent, nên khi buổi đã
+   điểm danh xong thì hội viên B vẫn nhận về **số buổi còn lại và ngày hết hạn
+   của A** — không trừ nhầm buổi, nhưng vẫn rò dữ liệu, và lỗi trông "đúng" vì
+   trả về 201
+
+Phép kiểm quyền phải đứng ngay sau khi đọc bản ghi, trước mọi nhánh trả về sớm.
+
+### Tệp riêng tư phải khai CHỦ
+
+`PROGRESS_PHOTO` và `MEMBER_AVATAR` là dữ liệu nhạy cảm nhất trong hệ thống.
+
+- hội viên gọi → `ownerId` bị **ép** về chính họ, bất kể client gửi gì
+- nhân viên gọi → **bắt buộc** khai tường minh (lễ tân chụp hộ khách là chuyện
+  thật, nhưng phải nói rõ chụp cho ai)
+- tải về: hội viên khác nhận **404**, không phải 403 — trả 403 là xác nhận tệp đó
+  tồn tại
+- CSDL có `CHECK file_private_needs_owner` chặn dạng hỏng thứ hai: tệp riêng tư
+  **không** khai chủ, tức không quy tắc nào gác được nó
+
+Migration đánh dấu `FAILED` cho dòng đang vi phạm thay vì xoá — tệp vẫn nằm trên
+S3, xoá dòng là mất dấu khoá vĩnh viễn.
+
+### Điểm danh bằng QR: mã là một ĐƯỜNG DẪN
+
+`https://app/me/checkin?b=<buổi>&t=<mã>`, không phải chuỗi thô. Camera mặc định
+của điện thoại mở được thẳng, nên hội viên không phải cài gì và web **không cần
+thư viện quét mã** — thứ mà Safari trên iOS không hỗ trợ sẵn.
+
+Điểm danh chạy khi người dùng **bấm**, không chạy lúc mở trang: nó là thao tác
+trừ một buổi tập, và thao tác đổi dữ liệu không nên xảy ra chỉ vì một đường dẫn
+được mở (trình duyệt, ứng dụng chat, phần mềm quét virus đều có thể mở trước).
+
+Màn huấn luyện viên tự làm mới mã trước khi hết hạn. Đó là điều làm nó khác một
+ảnh chụp màn hình: chụp lại gửi cho người khác thì trong vòng một phút là vô dụng.
+
+### Số đo cơ thể lưu SỐ NGUYÊN
+
+`weight_hg = kg × 10`, `body_fat_pm = % × 10`. Số thực trong CSDL là nguồn của
+những con số không bao giờ cộng đúng. Đổi đơn vị ở đúng một tầng (service); API
+nhận và trả số thực một chữ số thập phân.
+
+Một hội viên **một bản ghi mỗi ngày** (`uq_member_progress_day`): đo hai lần
+trong ngày thì ghi đè, không sinh hai dòng làm biểu đồ răng cưa.
 
 ### ⚠️ RLS KHÔNG áp được cho materialized view
 
@@ -583,6 +661,7 @@ apps/api/            NestJS
   src/billing/       hoá đơn, thu tiền, hoàn tiền, huỷ
   src/attendance/    lịch tập, điểm danh QR, tiêu thụ buổi (một nơi duy nhất)
   src/report/        bảng điều khiển, báo cáo PT/gói, bảng lương
+  src/me/            app hội viên — không endpoint nào nhận memberId từ client
   test/              4 cổng gác
 apps/web/            Next.js App Router, Server Component gọi API bằng cookie httpOnly
 packages/contracts/  zod DTO + type CSDL, dùng chung hai đầu
@@ -601,7 +680,7 @@ Theo thứ tự, vì mỗi bước dựa vào bước trước:
 | ~~2~~ | ~~Bán gói, hoá đơn trả góp, thu tiền, hoa hồng `SALE`~~ — xong 29/09/2026 |
 | ~~3~~ | ~~Lịch tập, điểm danh QR, hoa hồng `TEACH`, `revenue_entry`~~ — xong 29/09/2026 |
 | ~~4~~ | ~~Báo cáo doanh số, bảng lương PT, materialized view~~ — xong 29/09/2026 |
-| 5 | Web cho hội viên (`/me`) |
+| ~~5~~ | ~~Web cho hội viên (`/me`)~~ — xong 29/09/2026 |
 | 6 | Zalo OA theo từng phòng, outbox worker, chiến dịch chăm sóc |
 | 7 | Hạn mức gói SaaS, quản trị nền tảng, đối soát thu tiền thủ công |
 
@@ -615,10 +694,13 @@ Theo thứ tự, vì mỗi bước dựa vào bước trước:
 - **`cleanupOrphans()` của StorageService chưa có lịch chạy.** Hàm đã viết và
   chạy được, nhưng chưa gắn cron nên tệp `PENDING` quá hạn vẫn nằm lại trong
   bucket. Gắn khi có BullMQ.
-- **Chưa có màn hình THÊM/SỬA nào trên web.** API đủ cho PT, gói tập, bán gói,
-  thu tiền, hoàn tiền, đặt lịch và điểm danh; web mới có danh sách và màn xem.
-  Cùng lý do, chưa có màn quét QR cho hội viên — đường `/bookings/:id/checkin`
-  đã sẵn, chỉ thiếu giao diện camera.
+- **Màn quản lý chưa có THÊM/SỬA.** API đủ cho PT, gói tập, bán gói, thu tiền,
+  hoàn tiền, đặt lịch; màn quản lý mới có danh sách và màn xem. App hội viên thì
+  đã ghi được (nhật ký tiến độ, điểm danh).
+- **Hội viên chưa TỰ ĐẶT LỊCH được trên web.** API `POST /bookings` đã nhận vai
+  trò MEMBER và ràng buộc đủ (khung giờ PT, số buổi còn lại, cửa sổ đặt), nhưng
+  màn `/me/schedule` mới chỉ xem. Cần bước chọn huấn luyện viên và khung giờ
+  trống — phần tính khung trống chưa có endpoint riêng.
 - **Chưa có đổi lịch (reschedule).** Hiện phải huỷ rồi đặt lại, và nếu huỷ muộn
   thì bị trừ buổi — không đúng ý định của người dùng. Cần một thao tác riêng
   giữ nguyên buổi và chỉ đổi thời gian.

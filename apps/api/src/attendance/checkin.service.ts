@@ -10,6 +10,7 @@ import type { CheckinRequest, CheckinResponse, CheckinTokenResponse } from '@pt/
 import { TenantDb, type Tx } from '../common/tenant-db.service';
 import { requireContext } from '../common/tenant-context';
 import { SessionConsumptionService } from './session-consumption.service';
+import { chiLaHoiVien } from '../common/member-scope';
 
 /** Mã QR sống 60 giây. Đủ để quét, không đủ để chụp màn hình gửi cho nhau. */
 const TOKEN_TTL_GIAY = 60;
@@ -103,6 +104,21 @@ export class CheckinService {
     return this.tdb.run(async (tx) => {
       const b = await this.lockedForCheckin(tx, bookingId);
 
+      // Hội viên chỉ điểm danh cho CHÍNH MÌNH.
+      //
+      // Phải đứng TRƯỚC nhánh trả về idempotent bên dưới, không phải sau. Đo
+      // 29/09/2026 với phép kiểm đặt sau: hội viên B quét mã của buổi thuộc
+      // hội viên A, buổi đã điểm danh xong nên rơi vào nhánh idempotent và B
+      // nhận về SỐ BUỔI CÒN LẠI và NGÀY HẾT HẠN của A. Không trừ nhầm buổi,
+      // nhưng vẫn là rò dữ liệu — và lỗi trông "đúng" vì trả về 201.
+      //
+      // Mã QR chứng minh "huấn luyện viên đã mở buổi tập này"; nó KHÔNG chứng
+      // minh "đúng người đang xác nhận". Thiếu phép kiểm này thì ai đứng cạnh
+      // màn hình cũng quét được mã của người khác.
+      if (chiLaHoiVien(ctx) && ctx.memberId !== b.member_id) {
+        throw new ForbiddenException('NOT_YOUR_BOOKING');
+      }
+
       if (b.status === 'CHECKED_IN' || b.status === 'COMPLETED') {
         // Đã điểm danh rồi — trả kết quả cũ, không ném lỗi. Người dùng bấm hai
         // lần vì mạng chậm, không phải vì làm sai.
@@ -125,9 +141,8 @@ export class CheckinService {
         if (!laNhanVien && ctx.trainerId !== b.trainer_id) {
           throw new ForbiddenException('NOT_YOUR_BOOKING');
         }
-      } else if (dto.method === 'MEMBER_CONFIRM') {
-        if (ctx.memberId !== b.member_id) throw new ForbiddenException('NOT_YOUR_BOOKING');
       }
+      // Nhánh MEMBER_CONFIRM không cần kiểm riêng nữa: phép kiểm ở trên đã bao.
 
       // --- điều kiện của hợp đồng ------------------------------------------
       if (b.package_status !== 'ACTIVE') {
