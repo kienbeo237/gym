@@ -378,6 +378,7 @@ export interface RevenueEntry {
   id: Generated<Int8>;
   member_package_id: string;
   recognized_at: Generated<Timestamp>;
+  source: Generated<string>;
   tenant_id: string;
   trainer_id: string;
 }
@@ -532,6 +533,22 @@ export interface VInvoicePaidDrift {
   tenant_id: string | null;
 }
 
+export interface VRevenueDrift {
+  booking_id: string | null;
+  deducted: boolean | null;
+  so_dong_doanh_thu: Int8 | null;
+  status: string | null;
+  tenant_id: string | null;
+}
+
+export interface VRevenueOverContract {
+  code: string | null;
+  da_ghi_nhan: Numeric | null;
+  member_package_id: string | null;
+  price_net: Int8 | null;
+  tenant_id: string | null;
+}
+
 export interface VSaleCommissionDrift {
   invoice_id: string | null;
   payment_id: string | null;
@@ -550,6 +567,14 @@ export interface VSessionBalanceDrift {
   member_package_id: string | null;
   sessions_total: number | null;
   tenant_id: string | null;
+}
+
+export interface VTeachCommissionDrift {
+  booking_id: string | null;
+  doanh_thu: Int8 | null;
+  so_dong_hoa_hong: Int8 | null;
+  tenant_id: string | null;
+  trainer_id: string | null;
 }
 
 export interface DB {
@@ -592,6 +617,9 @@ export interface DB {
   trainer_availability: TrainerAvailability;
   v_commission_needs_policy: VCommissionNeedsPolicy;
   v_invoice_paid_drift: VInvoicePaidDrift;
+  v_revenue_drift: VRevenueDrift;
+  v_revenue_over_contract: VRevenueOverContract;
   v_sale_commission_drift: VSaleCommissionDrift;
   v_session_balance_drift: VSessionBalanceDrift;
+  v_teach_commission_drift: VTeachCommissionDrift;
 }

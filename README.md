@@ -3,10 +3,11 @@
 PostgreSQL · NestJS · Next.js · S3 · Redis. Một cài đặt phục vụ nhiều phòng tập,
 cách ly dữ liệu ở tầng cơ sở dữ liệu.
 
-**Trạng thái: Phase 0 + 1 + 2 xong.**
+**Trạng thái: Phase 0 → 3 xong.**
 Phase 0 — nền multi-tenant, xác thực hai bước, lát cắt hội viên, cổng gác tự động.
 Phase 1 — đăng nhập OTP, huấn luyện viên (khung giờ & hoa hồng), gói tập, tải tệp S3.
 Phase 2 — bán gói, hoá đơn trả góp, thu/hoàn tiền, hoa hồng bán hàng, đối soát.
+Phase 3 — lịch tập, điểm danh QR, chính sách huỷ/vắng, doanh thu ghi nhận, hoa hồng dạy.
 Xem [Còn phải làm](#còn-phải-làm).
 
 ---
@@ -96,7 +97,7 @@ trao transaction cho lời gọi. Service nghiệp vụ **không được** tiê
 ### Lớp 4 — Bốn cổng gác tự động
 
 ```bash
-pnpm --filter @pt/api test     # 38 phép kiểm
+pnpm --filter @pt/api test     # 41 phép kiểm
 ```
 
 | Nhóm | Bắt lớp lỗi |
@@ -107,7 +108,7 @@ pnpm --filter @pt/api test     # 38 phép kiểm
 | D. Hành vi | đọc/ghi chéo tenant, bằng **chính role app_rw** |
 | Kỷ luật CSDL | tiêm `DB_PLATFORM` vào service nghiệp vụ, hoặc dùng `SET` thay `set_config` |
 | Khoá Redis | khoá cache thiếu tiền tố `t:<tenantId>:` — rò dữ liệu qua đường cache |
-| Đối soát | số dư buổi / tiền đã thu / hoa hồng lệch khỏi sổ cái |
+| Đối soát | 7 view: số dư buổi, tiền đã thu, doanh thu, hoa hồng bán/dạy — lệch khỏi sổ cái |
 
 Bốn nhóm có **test âm** chống tautology: chúng tự tạo một vi phạm giả lập và đòi
 bộ nhận diện bắt được. Không có test âm thì một truy vấn luôn trả rỗng cũng làm
@@ -284,6 +285,88 @@ Cái thứ hai nguy hiểm hơn hẳn — nó vẫn ra một ngày **hợp lệ*
 Đã gặp thật ở `nextDueDate`. Cách chữa: `types.setTypeParser(DATE, v => v)` —
 giữ nguyên chuỗi `YYYY-MM-DD`, không có chỗ cho múi giờ chen vào.
 
+### Tiêu thụ một buổi tập: MỘT nơi duy nhất
+
+Ba đường dẫn tới việc trừ một buổi — **điểm danh**, **vắng mặt**, **huỷ muộn** —
+và cả ba phải làm đúng cùng một bộ năm việc:
+
+1. sổ cái −1 buổi (idempotent nhờ `uq_ledger_checkin`)
+2. `sessions_used += 1` (`sessions_remaining` do trigger tự lo)
+3. `revenue_entry` — doanh thu ghi nhận, một dòng một buổi
+4. `commission_entry` kind `TEACH` — **chỉ khi thật sự có buổi dạy**
+5. `notification_outbox` — nhắc hội viên số buổi còn lại
+
+Viết ba lần là ba lần lệch nhau, và lệch ở đây là lệch tiền. Nên cả ba đi qua
+`SessionConsumptionService.consume()`.
+
+**Vắng mặt và huỷ muộn VẪN ghi nhận doanh thu nhưng KHÔNG trả hoa hồng dạy** —
+phòng tập đã bán chỗ đó, nhưng không ai dạy cả. Đo được ngay trong dữ liệu:
+
+| Lý do | Số buổi | Doanh thu | Dòng hoa hồng dạy |
+| --- | --- | --- | --- |
+| `CHECKIN` | 3 | 1.800.000 | 3 |
+| `LATE_CANCEL` | 1 | 600.000 | 0 |
+| `NO_SHOW` | 1 | 600.000 | 0 |
+
+⚠️ **Quy tắc này cần chủ phòng xác nhận.** Nhiều phòng tập VẪN trả công cho huấn
+luyện viên khi hội viên vắng mặt, vì người đó đã tới và chờ. Muốn đổi thì thêm
+cột `pay_teach_on_no_show` vào `tenant_policy` và đọc ở **đúng một chỗ** trong
+`consume()` — đừng rải điều kiện ra các service gọi tới.
+
+### Đơn giá buổi tập và phần dư
+
+`price_net / sessions_total`, nhưng buổi **cuối cùng** nhận đúng phần còn lại
+chưa ghi nhận. Chia đều rồi làm tròn từng buổi sẽ lệch tổng vài đồng mỗi hợp
+đồng và kế toán sẽ trả lại báo cáo.
+
+Buổi vượt quá `sessions_total` (được **tặng** thêm) ghi nhận **0 đồng** — hội
+viên không trả tiền cho chúng. Gác bằng `v_revenue_over_contract`.
+
+### Điểm danh: vì sao cần mã QR
+
+Người bấm điểm danh cũng là người ăn hoa hồng dạy. Để huấn luyện viên tự bấm
+"đã tập" là bỏ mất chốt kiểm soát — trừ buổi của khách mà không dạy thì không ai
+biết. Mã QR buộc hội viên phải có mặt và thao tác.
+
+Mã sống **60 giây**, dùng **một lần** (`uq_checkin_token_open`), so sánh thời
+gian hằng. Thiếu ràng buộc một-lần thì chụp màn hình gửi cho nhau vẫn dùng được
+và cả phòng điểm danh bằng một ảnh.
+
+Vẫn có đường `PT_CONFIRM` / `ADMIN` cho khi hỏng camera — nhưng `checkin_by`
+được ghi lại và hội viên nhận thông báo ngay, đó là cơ chế đối soát thay thế.
+
+**Khoá HỢP ĐỒNG chứ không khoá buổi tập.** Khoá buổi tập chỉ chặn hai lần bấm
+cho *cùng* một buổi, mà `uq_ledger_checkin` đã lo ca đó. Cái cần chặn là hai
+buổi *khác nhau* của cùng một gói còn đúng một buổi — cả hai cùng đọc "còn 1"
+rồi cùng trừ.
+
+Bấm hai lần trả về **cùng kết quả** thay vì ném lỗi: người dùng bấm lại vì mạng
+chậm, không phải vì làm sai.
+
+### Chính sách huỷ: ai huỷ quan trọng hơn huỷ lúc nào
+
+**Nhân viên hoặc huấn luyện viên huỷ thì KHÔNG BAO GIỜ trừ buổi của hội viên** —
+lỗi từ phía phòng tập không được tính vào gói của khách. Chỉ khi *hội viên* huỷ
+mới xét `late_cancel_hours`, và mọi câu trả về đều kèm **lời giải thích** vì sao
+bị trừ / không bị trừ, để lễ tân không phải tự diễn giải cho khách.
+
+### Đặt lịch: chặn cả hai chiều thời gian
+
+`booking_window_days` chặn chiều tương lai. Chiều **quá khứ** cũng phải chặn:
+nhập bù buổi đã tập là chuyện thật nên không cấm hẳn, nhưng không giới hạn thì
+gõ nhầm năm (2025 thay vì 2026) sẽ tạo một buổi cách đây một năm và **không gì
+báo** — nó chỉ hiện ra khi ai đó lật lại báo cáo tháng cũ và thấy con số đã đổi.
+
+Đặt lịch **không** trừ buổi (trừ ở lúc điểm danh), nhưng số lịch chưa tập không
+được vượt số buổi còn lại — nếu không hội viên đặt 10 buổi khi chỉ còn 2.
+
+### Khoảng ngày trên lịch là ngày VIỆT NAM
+
+`WHERE (starts_at AT TIME ZONE 'Asia/Ho_Chi_Minh')::date BETWEEN :from AND :to`.
+So thẳng `timestamptz` với ngày sẽ lệch 7 tiếng ở hai đầu — buổi 6h sáng ngày
+đầu khoảng và buổi 22h ngày cuối khoảng đều rơi ra ngoài, và người dùng chỉ thấy
+"lịch bị thiếu buổi".
+
 ### Đăng nhập OTP
 
 Đường chính cho **hội viên** — họ được lễ tân tạo tài khoản rồi không bao giờ
@@ -405,6 +488,7 @@ apps/api/            NestJS
   src/commission/    phân giải chính sách + ghi hoa hồng (SALE nay, TEACH phase 3)
   src/sale/          bán gói: hợp đồng + sổ cái + hoá đơn + trả góp, một giao dịch
   src/billing/       hoá đơn, thu tiền, hoàn tiền, huỷ
+  src/attendance/    lịch tập, điểm danh QR, tiêu thụ buổi (một nơi duy nhất)
   test/              4 cổng gác
 apps/web/            Next.js App Router, Server Component gọi API bằng cookie httpOnly
 packages/contracts/  zod DTO + type CSDL, dùng chung hai đầu
@@ -421,7 +505,7 @@ Theo thứ tự, vì mỗi bước dựa vào bước trước:
 | --- | --- |
 | ~~1~~ | ~~Đăng nhập OTP, CRUD PT, gói tập, upload S3 presigned~~ — xong 29/09/2026 |
 | ~~2~~ | ~~Bán gói, hoá đơn trả góp, thu tiền, hoa hồng `SALE`~~ — xong 29/09/2026 |
-| 3 | Lịch tập, điểm danh QR, hoa hồng `TEACH`, `revenue_entry` |
+| ~~3~~ | ~~Lịch tập, điểm danh QR, hoa hồng `TEACH`, `revenue_entry`~~ — xong 29/09/2026 |
 | 4 | Báo cáo doanh số, bảng lương PT, materialized view |
 | 5 | Web cho hội viên (`/me`) |
 | 6 | Zalo OA theo từng phòng, outbox worker, chiến dịch chăm sóc |
@@ -438,8 +522,16 @@ Theo thứ tự, vì mỗi bước dựa vào bước trước:
   chạy được, nhưng chưa gắn cron nên tệp `PENDING` quá hạn vẫn nằm lại trong
   bucket. Gắn khi có BullMQ.
 - **Chưa có màn hình THÊM/SỬA nào trên web.** API đủ cho PT, gói tập, bán gói,
-  thu tiền và hoàn tiền; web mới có danh sách và màn xem. Cùng lý do, chưa có màn
-  tải ảnh đại diện.
+  thu tiền, hoàn tiền, đặt lịch và điểm danh; web mới có danh sách và màn xem.
+  Cùng lý do, chưa có màn quét QR cho hội viên — đường `/bookings/:id/checkin`
+  đã sẵn, chỉ thiếu giao diện camera.
+- **Chưa có đổi lịch (reschedule).** Hiện phải huỷ rồi đặt lại, và nếu huỷ muộn
+  thì bị trừ buổi — không đúng ý định của người dùng. Cần một thao tác riêng
+  giữ nguyên buổi và chỉ đổi thời gian.
+- **Buổi tập không tự chuyển sang `COMPLETED`.** Sau khi điểm danh nó nằm ở
+  `CHECKED_IN` mãi. Cần một job đóng buổi sau giờ kết thúc; gắn cùng BullMQ.
+- **Không tự đánh dấu vắng mặt.** Lễ tân phải bấm tay. Cùng job ở trên có thể
+  làm, nhưng đó là thao tác TRỪ TIỀN của khách nên để tự động cần chủ phòng chốt.
 - **Chưa có xuất hoá đơn PDF.** Cột `invoice.pdf_file_id` và luồng tải tệp S3 đã
   sẵn, chỉ thiếu bước sinh tệp.
 - **Thu tiền chưa phân bổ tự động qua nhiều đợt.** Thu 3 triệu khi đợt 1 còn thiếu

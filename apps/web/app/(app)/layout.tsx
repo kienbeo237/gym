@@ -11,6 +11,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   const session = await requireSession();
 
   const nav = [
+    { href: '/schedule', label: 'Lịch tập' },
     { href: '/members', label: 'Hội viên' },
     { href: '/trainers', label: 'Huấn luyện viên' },
     { href: '/packages', label: 'Gói tập' },

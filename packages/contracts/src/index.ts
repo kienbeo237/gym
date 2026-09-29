@@ -16,3 +16,4 @@ export * from './package.js';
 export * from './storage.js';
 export * from './sale.js';
 export * from './billing.js';
+export * from './booking.js';

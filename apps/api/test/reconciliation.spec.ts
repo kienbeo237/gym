@@ -26,6 +26,9 @@ const VIEWS = [
   ['v_invoice_paid_drift', 'Tiền đã thu trên hoá đơn lệch khỏi tổng các lần thu'],
   ['v_sale_commission_drift', 'Lần thu tiền không có đúng một dòng hoa hồng bán hàng'],
   ['v_commission_needs_policy', 'Hoa hồng ghi 0 đồng vì không phân giải được chính sách'],
+  ['v_revenue_drift', 'Buổi đã trừ không có đúng một dòng doanh thu'],
+  ['v_teach_commission_drift', 'Buổi đã dạy không có đúng một dòng hoa hồng dạy'],
+  ['v_revenue_over_contract', 'Doanh thu ghi nhận vượt quá giá bán của hợp đồng'],
 ] as const;
 
 let db: Client;

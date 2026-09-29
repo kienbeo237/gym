@@ -14,6 +14,7 @@ import { StorageModule } from './storage/storage.module';
 import { CommissionModule } from './commission/commission.module';
 import { SaleModule } from './sale/sale.module';
 import { BillingModule } from './billing/billing.module';
+import { AttendanceModule } from './attendance/attendance.module';
 import { HealthModule } from './health/health.module';
 
 @Module({
@@ -32,6 +33,7 @@ import { HealthModule } from './health/health.module';
     CommissionModule,
     SaleModule,
     BillingModule,
+    AttendanceModule,
     HealthModule,
   ],
   providers: [
