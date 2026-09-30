@@ -6,7 +6,7 @@
  * bình thường, không dấu hiệu nào, và ai đọc repo cũng ký được token hợp lệ.
  */
 import { describe, expect, it } from 'vitest';
-import { assertCauHinhSanSang } from '../src/common/config-guard';
+import { assertCauHinhSanSang, devLoginBat } from '../src/common/config-guard';
 
 const THAT: NodeJS.ProcessEnv = {
   NODE_ENV: 'production',
@@ -45,6 +45,21 @@ describe('Cổng gác cấu hình', () => {
   it('chặn khi thiếu hẳn một biến', () => {
     const { TENANT_SECRET_KEY: _bo, ...thieu } = THAT;
     expect(() => assertCauHinhSanSang(thieu)).toThrow('CONFIG_NOT_PRODUCTION_READY');
+  });
+
+  it('chặn DEV_LOGIN_BYPASS ở môi trường thật', () => {
+    expect(() => assertCauHinhSanSang({ ...THAT, DEV_LOGIN_BYPASS: '1' })).toThrow(
+      'CONFIG_NOT_PRODUCTION_READY',
+    );
+  });
+
+  it('đăng nhập nhanh chỉ bật khi CÓ cờ VÀ không phải production', () => {
+    expect(devLoginBat({ NODE_ENV: 'development', DEV_LOGIN_BYPASS: '1' })).toBe(true);
+    // Quên đặt NODE_ENV vẫn cần cờ tường minh.
+    expect(devLoginBat({})).toBe(false);
+    expect(devLoginBat({ NODE_ENV: 'development' })).toBe(false);
+    expect(devLoginBat({ NODE_ENV: 'development', DEV_LOGIN_BYPASS: 'true' })).toBe(false);
+    expect(devLoginBat({ NODE_ENV: 'production', DEV_LOGIN_BYPASS: '1' })).toBe(false);
   });
 
   it('chặn bí mật ký token quá ngắn', () => {

@@ -2,6 +2,8 @@ import {
   BadRequestException,
   Inject,
   Injectable,
+  Logger,
+  NotFoundException,
   UnauthorizedException,
   ForbiddenException,
 } from '@nestjs/common';
@@ -26,6 +28,7 @@ import type {
 import { DB_AUTH } from '../db/database.module';
 import { RateLimitService } from '../redis/rate-limit.service';
 import { globalKey, phoneKeyPart } from '../redis/redis-keys';
+import { devLoginBat } from '../common/config-guard';
 
 const sha256 = (v: string): string => createHash('sha256').update(v).digest('hex');
 
@@ -51,6 +54,8 @@ const REUSE_GRACE_MS = 30_000;
  */
 @Injectable()
 export class AuthService {
+  private readonly log = new Logger(AuthService.name);
+
   constructor(
     @Inject(DB_AUTH) private readonly db: Kysely<DB>,
     private readonly jwt: JwtService,
@@ -118,6 +123,28 @@ export class AuthService {
   }
 
   /**
+   * Đăng nhập nhanh CHỈ bằng số điện thoại — máy lập trình, để thử vai HLV /
+   * hội viên mà không cần mật khẩu hay kênh gửi OTP. Cờ tắt thì trả 404 như
+   * route không tồn tại. Bỏ qua cả mật khẩu tạm: đây là để thử màn hình, không
+   * phải để thử luồng đổi mật khẩu (luồng đó vẫn thử được qua tab Mật khẩu).
+   */
+  async devLogin(phone: string): Promise<LoginResponse> {
+    if (!devLoginBat()) throw new NotFoundException();
+
+    const identity = await this.db
+      .selectFrom('identity')
+      .select(['id', 'status'])
+      .where('phone', '=', phone)
+      .executeTakeFirst();
+    // Ở dev nói thẳng số không tồn tại: không có danh sách khách hàng thật nào để dò.
+    if (!identity) throw new BadRequestException({ code: 'DEV_LOGIN_UNKNOWN_PHONE', message: 'Không có tài khoản nào với số này' });
+    if (identity.status !== 'ACTIVE') throw new ForbiddenException('ACCOUNT_LOCKED');
+
+    this.log.warn(`DEV_LOGIN_BYPASS: đăng nhập không xác thực vào ${identity.id}`);
+    return this.completeAuthentication(identity.id, 'dev');
+  }
+
+  /**
    * Đặt mật khẩu mới thay mật khẩu tạm, rồi đi tiếp bước 1 như đăng nhập thường.
    *
    * Thu hồi MỌI refresh token của người này: ai đã đăng nhập bằng mật khẩu tạm
@@ -158,7 +185,7 @@ export class AuthService {
    * Hai đường tự dựng preToken riêng là hai chỗ để lệch nhau về sau (thời hạn,
    * claim thiếu), và lệch ở đây là lệch về bảo mật.
    */
-  async completeAuthentication(identityId: string, amr: 'pwd' | 'otp'): Promise<LoginResponse> {
+  async completeAuthentication(identityId: string, amr: PreTokenClaims['amr']): Promise<LoginResponse> {
     const identity = await this.db
       .selectFrom('identity')
       .select(['id', 'full_name'])
@@ -167,7 +194,7 @@ export class AuthService {
 
     const tenants = await this.tenantsOf(identity.id);
     // Cửa nền tảng chỉ hiện với đăng nhập bằng mật khẩu — xem LoginResponse.platform.
-    const level = amr === 'pwd' ? await this.platformLevelOf(identity.id) : null;
+    const level = amr !== 'otp' ? await this.platformLevelOf(identity.id) : null;
     if (tenants.length === 0 && !level) throw new ForbiddenException('NO_TENANT_MEMBERSHIP');
 
     const preToken = await this.jwt.signAsync(
@@ -218,7 +245,9 @@ export class AuthService {
    */
   async selectPlatform(preToken: string, ua?: string): Promise<PlatformSessionResponse> {
     const claims = await this.verifyPreToken(preToken);
-    if (claims.amr !== 'pwd') throw new ForbiddenException('PLATFORM_REQUIRES_PASSWORD');
+    // 'dev' kiểm lại cờ ở đây: preToken sống 5 phút, cờ có thể vừa bị tắt.
+    const hopLe = claims.amr === 'pwd' || (claims.amr === 'dev' && devLoginBat());
+    if (!hopLe) throw new ForbiddenException('PLATFORM_REQUIRES_PASSWORD');
     const level = await this.platformLevelOf(claims.sub);
     if (!level) throw new ForbiddenException('NOT_A_PLATFORM_ADMIN');
     return this.issuePlatformSession(claims.sub, level, randomUUID(), ua);

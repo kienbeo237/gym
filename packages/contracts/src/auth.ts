@@ -125,8 +125,12 @@ export type PreTokenClaims = {
   sub: string;
   /** CHANGE_PASSWORD: đăng nhập bằng mật khẩu tạm, chỉ đổi được mật khẩu. */
   stage: 'SELECT_TENANT' | 'CHANGE_PASSWORD';
-  /** Cách đã xác thực người: chỉ 'pwd' mới đổi được sang phiên nền tảng. */
-  amr: 'pwd' | 'otp';
+  /**
+   * Cách đã xác thực người: chỉ 'pwd' mới đổi được sang phiên nền tảng.
+   * 'dev' = đăng nhập nhanh chỉ bằng số điện thoại, chỉ tồn tại ở máy lập trình
+   * (xem devLoginBat() ở API) — cũng được vào nền tảng để thử màn quản trị.
+   */
+  amr: 'pwd' | 'otp' | 'dev';
   iat: number;
   exp: number;
 };

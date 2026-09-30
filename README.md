@@ -272,6 +272,14 @@ trị viên mới) có `must_change_password`. Đăng nhập bằng nó chỉ đ
 nền tảng — cho tới khi `POST /auth/change-password`. Đổi xong thì mọi refresh
 token cũ bị thu hồi.
 
+**Vào nhanh (chỉ máy lập trình).** `DEV_LOGIN_BYPASS=1` trong `.env` mở
+`POST /auth/dev-login`: chỉ số điện thoại → `preToken` (`amr: 'dev'`, vào được
+cả nền tảng), và tab "Vào nhanh" ở `/login` để thử vai HLV / hội viên không cần
+mật khẩu hay kênh OTP. Cần CẢ cờ lẫn `NODE_ENV` khác production — chỉ dựa vào
+NODE_ENV thì máy chủ quên đặt nó là mở cửa cho mọi số điện thoại. Ở production:
+route trả 404, tab bị loại khỏi bản build, `docker-compose.prod.yml` không truyền
+biến này vào container, và API từ chối khởi động nếu thấy nó.
+
 ### Chính sách huỷ / vắng mặt
 
 Phòng đặt mặc định ở `tenant_policy`, gói ghi đè từng ô ở `package_template`

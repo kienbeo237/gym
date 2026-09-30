@@ -20,6 +20,7 @@ import {
   ShieldHalf,
   Smartphone,
   Wallet,
+  Zap,
 } from 'lucide-react';
 import type { LoginResponse, PlatformSessionResponse, SessionResponse, TenantOption } from '@pt/contracts';
 import { TEN_VAI_TRO } from '../../lib/format';
@@ -27,7 +28,14 @@ import { ChangePassword } from './change-password';
 
 const API = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000/api';
 
-type Cach = 'MAT_KHAU' | 'OTP';
+type Cach = 'MAT_KHAU' | 'OTP' | 'NHANH';
+
+/**
+ * Tab "Vào nhanh" (chỉ số điện thoại) CHỈ có ở `next dev`: bản build production
+ * thay NODE_ENV bằng hằng 'production' nên cả tab bị loại khỏi mã. Cửa thật vẫn
+ * là API — /auth/dev-login trả 404 trừ khi DEV_LOGIN_BYPASS=1 ở máy lập trình.
+ */
+const CO_VAO_NHANH = process.env.NODE_ENV !== 'production';
 
 /**
  * Đăng nhập HAI BƯỚC, hai đường vào.
@@ -277,6 +285,9 @@ export default function LoginPage() {
                 if (cach === 'MAT_KHAU') {
                   return tiepTuc((await post('/auth/login', { phone, password })) as LoginResponse);
                 }
+                if (cach === 'NHANH') {
+                  return tiepTuc((await post('/auth/dev-login', { phone })) as LoginResponse);
+                }
                 if (!daGuiMa) {
                   const r = (await post('/auth/otp/request', { phone })) as { devCode?: string };
                   setDaGuiMa(true);
@@ -299,7 +310,9 @@ export default function LoginPage() {
               <p className="page-sub">
                 {cach === 'OTP'
                   ? 'Hội viên đăng nhập bằng mã gửi về số điện thoại.'
-                  : 'Nhân viên đăng nhập bằng mật khẩu được cấp.'}
+                  : cach === 'NHANH'
+                    ? 'Môi trường dev: chỉ cần số điện thoại, không mật khẩu, không mã.'
+                    : 'Nhân viên đăng nhập bằng mật khẩu được cấp.'}
               </p>
             </div>
 
@@ -308,6 +321,7 @@ export default function LoginPage() {
                 [
                   ['OTP', 'Mã xác thực', Smartphone],
                   ['MAT_KHAU', 'Mật khẩu', KeyRound],
+                  ...(CO_VAO_NHANH ? ([['NHANH', 'Vào nhanh', Zap]] as const) : []),
                 ] as const
               ).map(([v, label, Icon]) => (
                 <button key={v} type="button" role="tab" aria-selected={cach === v} onClick={() => doiCach(v)}>
@@ -336,6 +350,12 @@ export default function LoginPage() {
                 />
               </span>
             </label>
+
+            {cach === 'NHANH' && (
+              <span className="dev-hint">
+                <CircleAlert size={13} /> Chỉ có ở máy lập trình, cần <strong>DEV_LOGIN_BYPASS=1</strong> trong .env.
+              </span>
+            )}
 
             {cach === 'MAT_KHAU' && (
               <label className="field">
@@ -398,6 +418,8 @@ export default function LoginPage() {
                 ? 'Đang xử lý…'
                 : cach === 'MAT_KHAU'
                   ? 'Đăng nhập'
+                  : cach === 'NHANH'
+                    ? 'Vào ngay'
                   : daGuiMa
                     ? 'Xác nhận'
                     : 'Gửi mã xác thực'}

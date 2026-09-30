@@ -55,6 +55,17 @@ export class AuthController {
     return this.auth.completeAuthentication(identityId, 'otp');
   }
 
+  /**
+   * Bước 1 (CHỈ máy lập trình): chỉ số điện thoại -> preToken. Tắt (404) trừ
+   * khi DEV_LOGIN_BYPASS=1 và NODE_ENV khác production — xem devLoginBat().
+   */
+  @Public()
+  @Post('dev-login')
+  @HttpCode(200)
+  devLogin(@Body(new ZodPipe(OtpRequest)) body: OtpRequest): Promise<LoginResponse> {
+    return this.auth.devLogin(body.phone);
+  }
+
   /** Bước 2: chọn phòng tập -> token mang tenantId, từ đây RLS mới có đầu vào. */
   @Public()
   @Post('select-tenant')
