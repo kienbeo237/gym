@@ -123,7 +123,7 @@ export class AuthService {
   }
 
   /**
-   * Đăng nhập nhanh CHỈ bằng số điện thoại — máy lập trình, để thử vai HLV /
+   * Đăng nhập nhanh CHỈ bằng số điện thoại — máy lập trình / staging, để thử vai HLV /
    * hội viên mà không cần mật khẩu hay kênh gửi OTP. Cờ tắt thì trả 404 như
    * route không tồn tại. Bỏ qua cả mật khẩu tạm: đây là để thử màn hình, không
    * phải để thử luồng đổi mật khẩu (luồng đó vẫn thử được qua tab Mật khẩu).

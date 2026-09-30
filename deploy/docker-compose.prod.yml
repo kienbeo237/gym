@@ -56,6 +56,11 @@ x-api-env: &api-env
   SAAS_BANK_HOLDER: ${SAAS_BANK_HOLDER:-}
   SAAS_SUPPORT_CONTACT: ${SAAS_SUPPORT_CONTACT:-}
   SEPAY_WEBHOOK_KEY: ${SEPAY_WEBHOOK_KEY:-}
+  # Máy chủ STAGING: APP_ENV=staging + DEV_LOGIN_BYPASS=1 mở tab "Vào nhanh"
+  # (đăng nhập CHỈ bằng số điện thoại). Có cờ mà thiếu APP_ENV=staging thì API
+  # từ chối khởi động. Máy chủ thật: không đặt cả hai.
+  APP_ENV: ${APP_ENV:-production}
+  DEV_LOGIN_BYPASS: ${DEV_LOGIN_BYPASS:-}
 
 services:
   postgres:

@@ -65,6 +65,17 @@ BACKUP_ALERT_WEBHOOK=<URL webhook Slack/Discord/Google Chat — báo khi sao lư
 BACKUP_HEARTBEAT_URL=<URL ping healthchecks.io (chu kỳ 1 ngày, ân hạn 2 giờ) — báo khi IM LẶNG>
 ```
 
+CHỈ máy chủ **staging** (dữ liệu giả): tab "Vào nhanh" ở `/login`, đăng nhập
+chỉ bằng số điện thoại — ai biết số là vào được, kể cả quản trị nền tảng.
+Máy chủ thật không đặt hai dòng này; có `DEV_LOGIN_BYPASS` mà thiếu
+`APP_ENV=staging` thì API từ chối khởi động. Áp dụng bằng
+`docker compose -f docker-compose.prod.yml up -d api worker`.
+
+```
+APP_ENV=staging
+DEV_LOGIN_BYPASS=1
+```
+
 ### 1. Khoá SSH riêng cho deploy
 
 Không dùng khoá cá nhân. Sinh khoá mới, đưa khoá công khai lên máy chủ:

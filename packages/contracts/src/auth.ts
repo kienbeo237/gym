@@ -127,8 +127,8 @@ export type PreTokenClaims = {
   stage: 'SELECT_TENANT' | 'CHANGE_PASSWORD';
   /**
    * Cách đã xác thực người: chỉ 'pwd' mới đổi được sang phiên nền tảng.
-   * 'dev' = đăng nhập nhanh chỉ bằng số điện thoại, chỉ tồn tại ở máy lập trình
-   * (xem devLoginBat() ở API) — cũng được vào nền tảng để thử màn quản trị.
+   * 'dev' = đăng nhập nhanh chỉ bằng số điện thoại, chỉ có ở máy lập trình /
+   * staging (xem devLoginBat() ở API) — cũng được vào nền tảng để thử màn quản trị.
    */
   amr: 'pwd' | 'otp' | 'dev';
   iat: number;

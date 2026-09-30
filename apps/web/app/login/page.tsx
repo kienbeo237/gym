@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   ArrowLeft,
@@ -30,12 +30,6 @@ const API = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000/api';
 
 type Cach = 'MAT_KHAU' | 'OTP' | 'NHANH';
 
-/**
- * Tab "Vào nhanh" (chỉ số điện thoại) CHỈ có ở `next dev`: bản build production
- * thay NODE_ENV bằng hằng 'production' nên cả tab bị loại khỏi mã. Cửa thật vẫn
- * là API — /auth/dev-login trả 404 trừ khi DEV_LOGIN_BYPASS=1 ở máy lập trình.
- */
-const CO_VAO_NHANH = process.env.NODE_ENV !== 'production';
 
 /**
  * Đăng nhập HAI BƯỚC, hai đường vào.
@@ -62,6 +56,19 @@ export default function LoginPage() {
   const [doiMk, setDoiMk] = useState<LoginResponse | null>(null);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+
+  /**
+   * Tab "Vào nhanh" (chỉ số điện thoại) chỉ hiện khi API nói cửa đang mở —
+   * máy lập trình hoặc staging có DEV_LOGIN_BYPASS=1. Hỏi lúc chạy vì cùng một
+   * image chạy cả staging lẫn thật. Cửa thật vẫn là API: tab chỉ là lối vào.
+   */
+  const [coVaoNhanh, setCoVaoNhanh] = useState(false);
+  useEffect(() => {
+    fetch(API + '/auth/dev-login')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d: { enabled?: boolean } | null) => setCoVaoNhanh(d?.enabled === true))
+      .catch(() => {});
+  }, []);
 
   async function post(path: string, body: unknown, headers: Record<string, string> = {}) {
     const res = await fetch(API + path, {
@@ -321,7 +328,7 @@ export default function LoginPage() {
                 [
                   ['OTP', 'Mã xác thực', Smartphone],
                   ['MAT_KHAU', 'Mật khẩu', KeyRound],
-                  ...(CO_VAO_NHANH ? ([['NHANH', 'Vào nhanh', Zap]] as const) : []),
+                  ...(coVaoNhanh ?([['NHANH', 'Vào nhanh', Zap]] as const) : []),
                 ] as const
               ).map(([v, label, Icon]) => (
                 <button key={v} type="button" role="tab" aria-selected={cach === v} onClick={() => doiCach(v)}>
@@ -353,7 +360,7 @@ export default function LoginPage() {
 
             {cach === 'NHANH' && (
               <span className="dev-hint">
-                <CircleAlert size={13} /> Chỉ có ở máy lập trình, cần <strong>DEV_LOGIN_BYPASS=1</strong> trong .env.
+                <CircleAlert size={13} /> Chỉ có ở máy lập trình / <strong>staging</strong> — không bao giờ ở môi trường thật.
               </span>
             )}
 

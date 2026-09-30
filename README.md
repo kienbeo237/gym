@@ -272,13 +272,16 @@ trị viên mới) có `must_change_password`. Đăng nhập bằng nó chỉ đ
 nền tảng — cho tới khi `POST /auth/change-password`. Đổi xong thì mọi refresh
 token cũ bị thu hồi.
 
-**Vào nhanh (chỉ máy lập trình).** `DEV_LOGIN_BYPASS=1` trong `.env` mở
+**Vào nhanh (máy lập trình / staging).** `DEV_LOGIN_BYPASS=1` mở
 `POST /auth/dev-login`: chỉ số điện thoại → `preToken` (`amr: 'dev'`, vào được
 cả nền tảng), và tab "Vào nhanh" ở `/login` để thử vai HLV / hội viên không cần
-mật khẩu hay kênh OTP. Cần CẢ cờ lẫn `NODE_ENV` khác production — chỉ dựa vào
-NODE_ENV thì máy chủ quên đặt nó là mở cửa cho mọi số điện thoại. Ở production:
-route trả 404, tab bị loại khỏi bản build, `docker-compose.prod.yml` không truyền
-biến này vào container, và API từ chối khởi động nếu thấy nó.
+mật khẩu hay kênh OTP. Cần CẢ cờ lẫn môi trường không-thật: `NODE_ENV` khác
+production (máy lập trình) hoặc `APP_ENV=staging` (máy chủ — image luôn chạy
+NODE_ENV=production). Trang `/login` hỏi `GET /auth/dev-login` lúc chạy để biết
+có hiện tab không, vì cùng một image chạy cả staging lẫn thật. Máy chủ thật:
+không đặt cả hai — route trả 404, tab không hiện, và có cờ mà thiếu
+`APP_ENV=staging` thì API từ chối khởi động. **Staging bật cờ thì ai biết số
+điện thoại cũng vào được**, kể cả quản trị nền tảng: chỉ để dữ liệu giả ở đó.
 
 ### Chính sách huỷ / vắng mặt
 

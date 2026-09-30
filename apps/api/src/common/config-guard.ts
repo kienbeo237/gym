@@ -35,14 +35,18 @@ const PHAI_KIEM = [
 
 /**
  * Đăng nhập nhanh chỉ bằng số điện thoại (POST /auth/dev-login) — cho máy lập
- * trình thử vai HLV / hội viên mà không cần kênh gửi OTP hay mật khẩu.
+ * trình và máy chủ STAGING thử vai HLV / hội viên mà không cần kênh gửi OTP
+ * hay mật khẩu.
  *
- * Phải có CẢ HAI: bật tường minh `DEV_LOGIN_BYPASS=1` VÀ NODE_ENV khác
- * production. Chỉ dựa vào NODE_ENV thì một máy chủ quên đặt NODE_ENV (mặc định
- * coi là development) sẽ mở cửa cho bất kỳ ai gõ số điện thoại của người khác.
+ * Phải có CẢ HAI: bật tường minh `DEV_LOGIN_BYPASS=1` VÀ môi trường không phải
+ * thật — NODE_ENV khác production (máy lập trình), hoặc khai `APP_ENV=staging`
+ * (image chạy trên máy chủ luôn là NODE_ENV=production). Chỉ dựa vào một biến
+ * thì một dòng cấu hình sót lại là mở cửa cho bất kỳ ai gõ số điện thoại của
+ * người khác.
  */
 export function devLoginBat(env: NodeJS.ProcessEnv = process.env): boolean {
-  return env.DEV_LOGIN_BYPASS === '1' && (env.NODE_ENV ?? 'development') !== 'production';
+  if (env.DEV_LOGIN_BYPASS !== '1') return false;
+  return (env.NODE_ENV ?? 'development') !== 'production' || env.APP_ENV === 'staging';
 }
 
 export function assertCauHinhSanSang(env: NodeJS.ProcessEnv = process.env): void {
@@ -71,10 +75,12 @@ export function assertCauHinhSanSang(env: NodeJS.ProcessEnv = process.env): void
   // Driver log của SMS ghi NGUYÊN mã OTP ra log — ở môi trường thật đó là lộ mã.
   if (env.SMS_DRIVER === 'log') loi.push('SMS_DRIVER: "log" ghi mã OTP ra log, không dùng ở môi trường thật');
 
-  // devLoginBat() đã tự tắt khi NODE_ENV=production, nên cờ này ở đây không mở
-  // được gì — nhưng nó cho thấy ai đó định bật đăng nhập không mật khẩu trên máy
-  // chủ thật. Từ chối khởi động để người đó biết, thay vì im lặng bỏ qua.
-  if (env.DEV_LOGIN_BYPASS) loi.push('DEV_LOGIN_BYPASS: chỉ dùng ở máy lập trình, xoá khỏi cấu hình môi trường thật');
+  // Không khai APP_ENV=staging thì devLoginBat() tự tắt, nên cờ này ở đây không
+  // mở được gì — nhưng nó cho thấy ai đó định bật đăng nhập không mật khẩu trên
+  // máy chủ thật. Từ chối khởi động để người đó biết, thay vì im lặng bỏ qua.
+  if (env.DEV_LOGIN_BYPASS && env.APP_ENV !== 'staging') {
+    loi.push('DEV_LOGIN_BYPASS: chỉ dùng ở máy lập trình hoặc máy chủ có APP_ENV=staging');
+  }
 
   if (loi.length > 0) {
     new Logger('config').error(

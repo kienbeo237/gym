@@ -51,15 +51,28 @@ describe('Cổng gác cấu hình', () => {
     expect(() => assertCauHinhSanSang({ ...THAT, DEV_LOGIN_BYPASS: '1' })).toThrow(
       'CONFIG_NOT_PRODUCTION_READY',
     );
+    expect(() =>
+      assertCauHinhSanSang({ ...THAT, APP_ENV: 'production', DEV_LOGIN_BYPASS: '1' }),
+    ).toThrow('CONFIG_NOT_PRODUCTION_READY');
   });
 
-  it('đăng nhập nhanh chỉ bật khi CÓ cờ VÀ không phải production', () => {
+  it('cho DEV_LOGIN_BYPASS ở máy chủ khai APP_ENV=staging', () => {
+    expect(() =>
+      assertCauHinhSanSang({ ...THAT, APP_ENV: 'staging', DEV_LOGIN_BYPASS: '1' }),
+    ).not.toThrow();
+  });
+
+  it('đăng nhập nhanh chỉ bật khi CÓ cờ VÀ không phải môi trường thật', () => {
     expect(devLoginBat({ NODE_ENV: 'development', DEV_LOGIN_BYPASS: '1' })).toBe(true);
+    expect(devLoginBat({ NODE_ENV: 'production', APP_ENV: 'staging', DEV_LOGIN_BYPASS: '1' })).toBe(true);
     // Quên đặt NODE_ENV vẫn cần cờ tường minh.
     expect(devLoginBat({})).toBe(false);
     expect(devLoginBat({ NODE_ENV: 'development' })).toBe(false);
     expect(devLoginBat({ NODE_ENV: 'development', DEV_LOGIN_BYPASS: 'true' })).toBe(false);
     expect(devLoginBat({ NODE_ENV: 'production', DEV_LOGIN_BYPASS: '1' })).toBe(false);
+    expect(devLoginBat({ NODE_ENV: 'production', APP_ENV: 'production', DEV_LOGIN_BYPASS: '1' })).toBe(false);
+    // Khai staging thôi chưa đủ: cờ vẫn phải bật tường minh.
+    expect(devLoginBat({ NODE_ENV: 'production', APP_ENV: 'staging' })).toBe(false);
   });
 
   it('chặn bí mật ký token quá ngắn', () => {

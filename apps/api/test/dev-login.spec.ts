@@ -8,10 +8,12 @@ import { NotFoundException } from '@nestjs/common';
 import { AuthService } from '../src/auth/auth.service';
 
 const svc = new AuthService({} as never, {} as never, {} as never, {} as never);
-const goc = { NODE_ENV: process.env.NODE_ENV, DEV_LOGIN_BYPASS: process.env.DEV_LOGIN_BYPASS };
+const KHOA = ['NODE_ENV', 'APP_ENV', 'DEV_LOGIN_BYPASS'] as const;
+type Env = Partial<Record<(typeof KHOA)[number], string>>;
+const goc: Env = Object.fromEntries(KHOA.map((k) => [k, process.env[k]]));
 
-function datEnv(env: { NODE_ENV?: string; DEV_LOGIN_BYPASS?: string }) {
-  for (const k of ['NODE_ENV', 'DEV_LOGIN_BYPASS'] as const) {
+function datEnv(env: Env) {
+  for (const k of KHOA) {
     if (env[k] === undefined) delete process.env[k];
     else process.env[k] = env[k];
   }
@@ -23,13 +25,17 @@ describe('POST /auth/dev-login', () => {
   it.each([
     ['không có cờ', { NODE_ENV: 'development' }],
     ['production dù có cờ', { NODE_ENV: 'production', DEV_LOGIN_BYPASS: '1' }],
+    ['staging mà không có cờ', { NODE_ENV: 'production', APP_ENV: 'staging' }],
   ])('404 khi %s', async (_ten, env) => {
     datEnv(env);
     await expect(svc.devLogin('+84901100001')).rejects.toBeInstanceOf(NotFoundException);
   });
 
-  it('có cờ ở dev thì qua cổng (và đi tới bước tra CSDL)', async () => {
-    datEnv({ NODE_ENV: 'development', DEV_LOGIN_BYPASS: '1' });
+  it.each([
+    ['dev', { NODE_ENV: 'development', DEV_LOGIN_BYPASS: '1' }],
+    ['staging', { NODE_ENV: 'production', APP_ENV: 'staging', DEV_LOGIN_BYPASS: '1' }],
+  ])('có cờ ở %s thì qua cổng (và đi tới bước tra CSDL)', async (_ten, env) => {
+    datEnv(env);
     await expect(svc.devLogin('+84901100001')).rejects.not.toBeInstanceOf(NotFoundException);
   });
 });

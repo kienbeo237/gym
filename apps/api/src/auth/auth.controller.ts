@@ -1,4 +1,4 @@
-import { Body, Controller, Headers, HttpCode, Post, Req, UsePipes } from '@nestjs/common';
+import { Body, Controller, Get, Headers, HttpCode, Post, Req, UsePipes } from '@nestjs/common';
 import {
   ChangePasswordRequest,
   LoginRequest,
@@ -14,6 +14,7 @@ import { AuthService } from './auth.service';
 import { OtpService } from './otp.service';
 import { Public } from '../common/auth.guard';
 import { ZodPipe } from '../common/zod.pipe';
+import { devLoginBat } from '../common/config-guard';
 
 @Controller('auth')
 export class AuthController {
@@ -56,8 +57,19 @@ export class AuthController {
   }
 
   /**
-   * Bước 1 (CHỈ máy lập trình): chỉ số điện thoại -> preToken. Tắt (404) trừ
-   * khi DEV_LOGIN_BYPASS=1 và NODE_ENV khác production — xem devLoginBat().
+   * Trang /login hỏi ở đây để biết có hiện tab "Vào nhanh" không. Hỏi lúc chạy
+   * chứ không nướng vào bản build: cùng một image chạy cả staging lẫn thật.
+   */
+  @Public()
+  @Get('dev-login')
+  devLoginStatus(): { enabled: boolean } {
+    return { enabled: devLoginBat() };
+  }
+
+  /**
+   * Bước 1 (CHỈ máy lập trình / staging): chỉ số điện thoại -> preToken. Tắt
+   * (404) trừ khi DEV_LOGIN_BYPASS=1 và không phải môi trường thật — xem
+   * devLoginBat().
    */
   @Public()
   @Post('dev-login')
