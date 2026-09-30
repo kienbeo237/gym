@@ -25,6 +25,8 @@ import { OtpService } from '../src/auth/otp.service';
 import type { RateLimitService } from '../src/redis/rate-limit.service';
 
 config({ path: resolve(__dirname, '../../../.env') });
+// CI không có .env: khoá gốc chỉ để niêm phong/mở secret OA TRONG test này.
+process.env.TENANT_SECRET_KEY ||= 'test-only-master-key-not-a-secret-0000000';
 
 function savepointKysely(c: Client): Kysely<DB> {
   let n = 0;
