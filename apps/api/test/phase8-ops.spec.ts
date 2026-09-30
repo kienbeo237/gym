@@ -166,11 +166,15 @@ async function datBuoi(
 ) {
   const endsAt = new Date(startsAt.getTime() + 60 * 60_000);
   const { rows } = await q<{ id: string }>(
-    `INSERT INTO booking (tenant_id, member_package_id, member_id, trainer_id, starts_at, ends_at, status, checkin_at, checkin_method)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id`,
+    `INSERT INTO booking (tenant_id, member_package_id, member_id, trainer_id, starts_at, ends_at, status,
+                          checkin_at, checkin_method, checkin_note)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING id`,
     [
       tenantA, g.memberPackageId, g.memberId, g.trainerId, startsAt, endsAt, status,
-      status === 'CHECKED_IN' ? startsAt : null, status === 'CHECKED_IN' ? 'ADMIN' : null,
+      status === 'CHECKED_IN' ? startsAt : null,
+      status === 'CHECKED_IN' ? 'ADMIN' : null,
+      // Điểm danh hộ bắt buộc có lý do (booking_manual_checkin_note, 0021).
+      status === 'CHECKED_IN' ? 'dữ liệu test' : null,
     ],
   );
   return rows[0]!.id;

@@ -3,8 +3,10 @@
 import { use, useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import QRCode from 'qrcode';
-import { ArrowLeft, CircleAlert, LoaderCircle, RefreshCw, Smartphone } from 'lucide-react';
-import type { CheckinTokenResponse } from '@pt/contracts';
+import { ArrowLeft, CircleAlert, CircleCheck, LoaderCircle, RefreshCw, Smartphone } from 'lucide-react';
+import type { CheckinResponse, CheckinTokenResponse } from '@pt/contracts';
+import { ManualCheckin } from '../../../../components/manual-checkin';
+import { ngayISO } from '../../../../lib/format';
 
 /** Mã sống 60 giây; làm mới sớm hơn vài giây để không bao giờ hiện mã đã chết. */
 const LAM_MOI_TRUOC = 5;
@@ -29,6 +31,8 @@ export default function CheckinQr({ params }: { params: Promise<{ bookingId: str
   const [dangTai, setDangTai] = useState(false);
   // Buổi đã xong / đã huỷ: tạo lại mã cũng vô ích, nên ẩn nút và chỉ đường về lịch.
   const [daDong, setDaDong] = useState(false);
+  // Đã điểm danh hộ xong: thôi xin mã (API sẽ trả "không điểm danh được nữa").
+  const [xongHo, setXongHo] = useState<CheckinResponse | null>(null);
   const dangChay = useRef(false);
 
   const xinMa = useCallback(async () => {
@@ -72,8 +76,8 @@ export default function CheckinQr({ params }: { params: Promise<{ bookingId: str
   }, [xinMa]);
 
   useEffect(() => {
-    // Đang lỗi thì thôi đếm — không tự gọi lại API mỗi vài giây vô ích.
-    if (loi) return;
+    // Đang lỗi / đã điểm danh hộ thì thôi đếm — không tự gọi lại API mỗi vài giây vô ích.
+    if (loi || xongHo) return;
     const id = setInterval(() => {
       setConLai((n) => {
         if (n <= LAM_MOI_TRUOC) {
@@ -87,6 +91,34 @@ export default function CheckinQr({ params }: { params: Promise<{ bookingId: str
   }, [xinMa, loi]);
 
   const pct = tongThoiGian > 0 ? Math.max(0, Math.min(100, (conLai / tongThoiGian) * 100)) : 0;
+
+  if (xongHo) {
+    return (
+      <>
+        <Link href="/schedule" className="back-link">
+          <ArrowLeft size={15} /> Lịch tập
+        </Link>
+        <section className="card qr-card">
+          <span className="success-mark">
+            <CircleCheck size={38} />
+          </span>
+          <div>
+            <h1 className="page-title">Đã điểm danh hộ</h1>
+            <p className="page-sub" style={{ marginTop: 6 }}>
+              Hội viên còn{' '}
+              <strong className={xongHo.lowBalanceWarning ? 'text-danger' : undefined}>
+                {xongHo.sessionsRemaining}/{xongHo.sessionsTotal}
+              </strong>{' '}
+              buổi · gói hết hạn {ngayISO(xongHo.expiresOn)}
+            </p>
+          </div>
+          <Link href={`/schedule/${bookingId}`} className="btn btn-secondary">
+            Xem buổi tập
+          </Link>
+        </section>
+      </>
+    );
+  }
 
   return (
     <>
@@ -132,10 +164,13 @@ export default function CheckinQr({ params }: { params: Promise<{ bookingId: str
             <ArrowLeft size={16} /> Về lịch tập
           </Link>
         ) : (
-          <button className="btn btn-secondary" onClick={() => void xinMa()} disabled={dangTai}>
-            <RefreshCw size={16} className={dangTai ? 'spin' : undefined} />
-            Tạo mã mới
-          </button>
+          <>
+            <button className="btn btn-secondary" onClick={() => void xinMa()} disabled={dangTai}>
+              <RefreshCw size={16} className={dangTai ? 'spin' : undefined} />
+              Tạo mã mới
+            </button>
+            <ManualCheckin bookingId={bookingId} onDone={setXongHo} />
+          </>
         )}
       </section>
     </>

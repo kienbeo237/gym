@@ -16,7 +16,8 @@ export async function goiApi<T = unknown>(
   const text = await res.text();
   const data = text ? (JSON.parse(text) as Record<string, unknown>) : {};
   if (res.status === 401) {
-    window.location.href = '/login';
+    // Đăng nhập xong quay lại đúng trang đang làm dở (xem duongDanTiepTheo).
+    window.location.href = `/login?next=${encodeURIComponent(window.location.pathname + window.location.search)}`;
     throw new Error('Phiên đăng nhập đã hết hạn');
   }
   if (!res.ok) {

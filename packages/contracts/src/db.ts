@@ -74,6 +74,7 @@ export interface Booking {
   checkin_at: Timestamp | null;
   checkin_by: string | null;
   checkin_method: string | null;
+  checkin_note: string | null;
   created_at: Generated<Timestamp>;
   created_by: string | null;
   deducted: Generated<boolean>;

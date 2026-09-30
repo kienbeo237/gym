@@ -628,8 +628,30 @@ Mã sống **60 giây**, dùng **một lần** (`uq_checkin_token_open`), so sá
 gian hằng. Thiếu ràng buộc một-lần thì chụp màn hình gửi cho nhau vẫn dùng được
 và cả phòng điểm danh bằng một ảnh.
 
-Vẫn có đường `PT_CONFIRM` / `ADMIN` cho khi hỏng camera — nhưng `checkin_by`
-được ghi lại và hội viên nhận thông báo ngay, đó là cơ chế đối soát thay thế.
+**Điểm danh hộ** (`PT_CONFIRM` / `ADMIN`, nút "Hội viên không quét được mã?"
+dưới mã QR) cho ca có thật — quên điện thoại, hỏng camera. Chặn hẳn thì người
+ta điểm danh bằng cách khác không để lại dấu vết, nên đường này mở nhưng phải
+để lại ĐỦ dấu vết:
+
+- **lý do bắt buộc** — API, và CSDL (`booking_manual_checkin_note`, 0021: CHECK
+  phải `coalesce`, vì `length(btrim(NULL)) >= 5` là NULL và CHECK coi NULL là
+  qua — test bắt được đúng lỗi này);
+- **ai bấm**: `checkin_by` + `audit_log` (`CHECKIN_MANUAL`);
+- **phương thức theo VAI người bấm**, không theo client khai: HLV không ghi
+  được "phòng tập xác nhận" cho buổi mình ăn hoa hồng;
+- **hội viên thấy**: lý do nằm trong dòng sổ cái ở màn "Lịch sử" của họ (không
+  phụ thuộc Zalo), cộng tin "số buổi còn lại" như mọi lần điểm danh;
+- **chủ phòng thấy**: nhãn vàng "HLV điểm danh hộ" + lý do ở chi tiết buổi tập.
+
+Khung giờ điểm danh (`CHECKIN_OUT_OF_WINDOW`) áp cho cả đường này: không điểm
+danh hộ bù cho buổi tuần trước được.
+
+**Quét mã khi chưa đăng nhập.** Middleware chặn trang lúc chưa đăng nhập và về
+`/login?next=<trang>`; đăng nhập xong quay lại đúng trang điểm danh. Mã sống 60
+giây, đăng nhập bằng OTP thường lâu hơn — trang điểm danh nói thẳng "quét lại
+mã mới" thay vì để nút xác nhận bấm mãi không được. `next` chỉ nhận đường dẫn
+trong cùng trang (`lib/duong-dan.ts`), chặn `//host`, `/\host`, ký tự điều
+khiển — không thì link /login thật đưa người ta sang trang giả.
 
 **Khoá HỢP ĐỒNG chứ không khoá buổi tập.** Khoá buổi tập chỉ chặn hai lần bấm
 cho *cùng* một buổi, mà `uq_ledger_checkin` đã lo ca đó. Cái cần chặn là hai

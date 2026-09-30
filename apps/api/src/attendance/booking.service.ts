@@ -89,7 +89,7 @@ export class BookingService {
       .innerJoin('member_package as mp', 'mp.id', 'b.member_package_id')
       .select([
         'b.id', 'b.starts_at as startsAt', 'b.ends_at as endsAt', 'b.status',
-        'b.checkin_at as checkinAt', 'b.checkin_method as checkinMethod',
+        'b.checkin_at as checkinAt', 'b.checkin_method as checkinMethod', 'b.checkin_note as checkinNote',
         'b.deducted', 'b.cancel_reason as cancelReason', 'b.note',
         'm.id as memberId', 'm.code as memberCode', 'mi.full_name as memberName',
         't.id as trainerId', 'ti.full_name as trainerName',
@@ -127,6 +127,7 @@ export class BookingService {
       sessionsRemaining: r.sessionsRemaining,
       checkinAt: r.checkinAt ? new Date(r.checkinAt).toISOString() : null,
       checkinMethod: r.checkinMethod,
+      checkinNote: r.checkinNote,
       deducted: r.deducted,
       cancelReason: r.cancelReason,
       lateCancelHours: r.lateCancelHours,

@@ -19,6 +19,19 @@ import { ngayISO } from '../../../lib/format';
  * đường dẫn được mở (trình duyệt, ứng dụng chat, phần mềm quét virus đều có
  * thể mở trước nó).
  */
+/** Lỗi hội viên hay gặp, nói bằng việc cần làm tiếp thay vì mã lỗi. */
+const LOI_DIEM_DANH: Record<string, string> = {
+  CHECKIN_TOKEN_INVALID:
+    'Mã này đã hết hạn — mỗi mã chỉ dùng được trong 60 giây. Hãy quét lại mã mới đang hiện trên màn hình huấn luyện viên.',
+  CHECKIN_TOKEN_REQUIRED: 'Không đọc được mã điểm danh. Hãy quét lại mã trên màn hình huấn luyện viên.',
+  NOT_YOUR_BOOKING:
+    'Buổi tập này không phải của tài khoản đang đăng nhập. Kiểm tra lại bạn đã đăng nhập đúng số điện thoại chưa.',
+  BOOKING_NOT_CHECKINABLE: 'Buổi tập này đã được điểm danh, đã huỷ hoặc đã đánh vắng.',
+  CHECKIN_OUT_OF_WINDOW: 'Chưa tới giờ (hoặc đã quá giờ) của buổi tập này nên chưa điểm danh được.',
+  NO_SESSION_LEFT: 'Gói tập đã hết buổi. Vui lòng gia hạn tại quầy.',
+  PACKAGE_EXPIRED: 'Gói tập đã hết hạn. Vui lòng gia hạn tại quầy.',
+};
+
 export default function MeCheckinPage() {
   // useSearchParams cần ranh giới Suspense, không thì cả trang bị ép render
   // phía client lúc build.
@@ -37,6 +50,7 @@ function MeCheckin() {
   const [busy, setBusy] = useState(false);
   const [ketQua, setKetQua] = useState<CheckinResponse | null>(null);
   const [loi, setLoi] = useState('');
+  const [phaiQuetLai, setPhaiQuetLai] = useState(false);
 
   const thieuThamSo = !bookingId || !token;
 
@@ -50,7 +64,14 @@ function MeCheckin() {
         body: JSON.stringify({ bookingId, token }),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.message ?? 'Không điểm danh được');
+      if (!res.ok) {
+        // Ca thường gặp nhất: mã chỉ sống 60 giây, và đăng nhập (nhận OTP) lâu
+        // hơn thế. Bấm lại cũng vô ích — phải quét mã mới trên màn hình HLV.
+        // Lỗi nghiệp vụ mang `code`; lỗi quyền (403) của Nest để mã trong `message`.
+        const ma = String(data.code ?? data.message ?? '');
+        if (ma === 'CHECKIN_TOKEN_INVALID' || ma === 'CHECKIN_TOKEN_REQUIRED') setPhaiQuetLai(true);
+        throw new Error(LOI_DIEM_DANH[ma] ?? data.message ?? 'Không điểm danh được');
+      }
       setKetQua(data as CheckinResponse);
     } catch (e) {
       setLoi(e instanceof Error ? e.message : 'Đã có lỗi xảy ra');
@@ -128,13 +149,21 @@ function MeCheckin() {
               <div className="alert-body">{loi}</div>
             </div>
           )}
-          <button className="btn btn-primary btn-lg btn-block" onClick={() => void diemDanh()} disabled={busy}>
-            {busy && <LoaderCircle size={18} className="spin" />}
-            {busy ? 'Đang xử lý…' : 'Xác nhận điểm danh'}
-          </button>
-          <Link href="/me" className="btn btn-ghost btn-block">
-            Huỷ
-          </Link>
+          {phaiQuetLai ? (
+            <Link href="/me" className="btn btn-secondary btn-lg btn-block">
+              Về trang chính
+            </Link>
+          ) : (
+            <>
+              <button className="btn btn-primary btn-lg btn-block" onClick={() => void diemDanh()} disabled={busy}>
+                {busy && <LoaderCircle size={18} className="spin" />}
+                {busy ? 'Đang xử lý…' : 'Xác nhận điểm danh'}
+              </button>
+              <Link href="/me" className="btn btn-ghost btn-block">
+                Huỷ
+              </Link>
+            </>
+          )}
         </>
       )}
     </div>

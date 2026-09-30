@@ -69,9 +69,39 @@ async function lamMoi(refreshToken: string, ua: string | null): Promise<KetQua> 
   }
 }
 
+/**
+ * Chưa đăng nhập mà mở một TRANG -> về /login, nhớ trang đang mở trong `next`.
+ *
+ * Ca chính: hội viên quét mã QR điểm danh trên điện thoại chưa đăng nhập.
+ * Trước đây layout tự redirect('/login') trơn — đăng nhập xong về trang chủ,
+ * đường dẫn điểm danh mất, phải quét lại. Làm ở middleware vì đây là nơi DUY
+ * NHẤT biết đường dẫn đang mở; layout của Next thì không.
+ *
+ * Route /api/* không chuyển hướng: gọi từ fetch, cần 401 để tự xử lý, không
+ * cần một trang HTML đăng nhập.
+ *
+ * Origin lấy từ header nginx gửi (Host, X-Forwarded-Proto — deploy/nginx):
+ * sau proxy, URL Next tự dựng mang http:// và cổng nội bộ. Next không nhận
+ * Location tương đối ở middleware. KHÔNG đọc X-Forwarded-Host: nginx không
+ * đặt nó nên giá trị (nếu có) là do client tự gửi.
+ */
+function veDangNhap(req: NextRequest): NextResponse | null {
+  const { pathname, search } = req.nextUrl;
+  // /_next, /__nextjs_*: tệp và endpoint nội bộ của Next (kể cả lớp báo lỗi
+  // lúc dev) — không phải trang.
+  if (pathname.startsWith('/api/') || pathname.startsWith('/_next') || pathname.startsWith('/__next')) return null;
+  const proto = req.headers.get('x-forwarded-proto')?.split(',')[0]?.trim() || req.nextUrl.protocol.replace(':', '');
+  const host = req.headers.get('host') ?? req.nextUrl.host;
+  const dich = new URL('/login', `${proto}://${host}`);
+  if (pathname !== '/') dich.searchParams.set('next', pathname + search);
+  return NextResponse.redirect(dich, 307);
+}
+
 export async function middleware(req: NextRequest): Promise<NextResponse> {
   const rt = req.cookies.get(COOKIE_REFRESH)?.value;
-  if (!rt || conHan(req.cookies.get(COOKIE_ACCESS)?.value)) return NextResponse.next();
+  const at = req.cookies.get(COOKIE_ACCESS)?.value;
+  if (!rt && !at) return veDangNhap(req) ?? NextResponse.next();
+  if (!rt || conHan(at)) return NextResponse.next();
 
   let viec = dangLam.get(rt);
   if (!viec) {
@@ -85,11 +115,12 @@ export async function middleware(req: NextRequest): Promise<NextResponse> {
   if (!kq.ok) {
     // Lỗi mạng: để nguyên, trang tự xử lý như chưa có middleware.
     if (!kq.chet) return NextResponse.next();
-    // Phiên đã chết: xoá cookie để trang tự đưa về /login, thay vì lần nào
-    // cũng gọi API làm mới một token đã bị thu hồi.
+    // Phiên đã chết: xoá cookie (thay vì lần nào cũng gọi API làm mới một
+    // token đã bị thu hồi) và về /login, nhớ trang đang mở. Route /api/* thì
+    // để đi tiếp — không có cookie nó tự trả 401.
     req.cookies.delete(COOKIE_ACCESS);
     req.cookies.delete(COOKIE_REFRESH);
-    const res = NextResponse.next({ request: { headers: req.headers } });
+    const res = veDangNhap(req) ?? NextResponse.next({ request: { headers: req.headers } });
     xoaCookiePhien(res.cookies);
     return res;
   }

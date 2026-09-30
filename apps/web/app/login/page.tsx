@@ -1,7 +1,7 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { Suspense, useEffect, useState } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import {
   ArrowLeft,
   Building2,
@@ -24,12 +24,22 @@ import {
 } from 'lucide-react';
 import type { LoginResponse, PlatformSessionResponse, SessionResponse, TenantOption } from '@pt/contracts';
 import { TEN_VAI_TRO } from '../../lib/format';
+import { duongDanTiepTheo } from '../../lib/duong-dan';
 import { ChangePassword } from './change-password';
 
 const API = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000/api';
 
 type Cach = 'MAT_KHAU' | 'OTP' | 'NHANH';
 
+// useSearchParams cần ranh giới Suspense, không thì cả trang bị ép render phía
+// client lúc build.
+export default function LoginPage() {
+  return (
+    <Suspense>
+      <Login />
+    </Suspense>
+  );
+}
 
 /**
  * Đăng nhập HAI BƯỚC, hai đường vào.
@@ -42,9 +52,14 @@ type Cach = 'MAT_KHAU' | 'OTP' | 'NHANH';
  *
  * Mặc định là OTP vì phần lớn người đăng nhập là HỘI VIÊN, và họ không có mật
  * khẩu để nhớ — tài khoản do lễ tân tạo. Mật khẩu là đường của nhân viên.
+ *
+ * `?next=` (middleware gắn khi chặn một trang lúc chưa đăng nhập): xong thì
+ * quay lại đúng trang đó — ca chính là hội viên quét mã QR điểm danh.
  */
-export default function LoginPage() {
+function Login() {
   const router = useRouter();
+  const tiep = duongDanTiepTheo(useSearchParams().get('next'));
+  const diemDanh = tiep?.startsWith('/me/checkin') ?? false;
   const [cach, setCach] = useState<Cach>('OTP');
   const [phone, setPhone] = useState('');
   const [password, setPassword] = useState('');
@@ -101,9 +116,10 @@ export default function LoginPage() {
       }),
     });
     if (!res.ok) throw new Error('Không lưu được phiên đăng nhập');
-    // Về '/' để trang gốc điều hướng theo vai trò: hội viên vào /me, nhân viên
-    // vào màn quản lý.
-    router.replace('/');
+    // Có trang đang chờ (vd. điểm danh) thì về đó; không thì về '/' để trang
+    // gốc điều hướng theo vai trò: hội viên vào /me, nhân viên vào màn quản lý.
+    // Phiên phòng tập không mở được /platform nên bỏ qua `next` loại đó.
+    router.replace(tiep && !tiep.startsWith('/platform') ? tiep : '/');
     router.refresh();
   }
 
@@ -130,7 +146,7 @@ export default function LoginPage() {
       }),
     });
     if (!res.ok) throw new Error('Không lưu được phiên đăng nhập');
-    router.replace('/platform');
+    router.replace(tiep?.startsWith('/platform') ? tiep : '/platform');
     router.refresh();
   }
 
@@ -322,6 +338,18 @@ export default function LoginPage() {
                     : 'Nhân viên đăng nhập bằng mật khẩu được cấp.'}
               </p>
             </div>
+
+            {/* Hội viên vừa quét mã QR trên điện thoại chưa đăng nhập: nói rõ vì
+                sao lại ở màn này và điều gì xảy ra sau đó. */}
+            {diemDanh && (
+              <div className="alert" data-tone="info" role="status">
+                <QrCode size={17} />
+                <div className="alert-body">
+                  Đăng nhập để điểm danh buổi tập — xong sẽ tự quay lại trang điểm danh. Lần sau không phải đăng
+                  nhập lại trên máy này.
+                </div>
+              </div>
+            )}
 
             <div className="segmented segmented-block" role="tablist">
               {(

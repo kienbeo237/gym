@@ -66,6 +66,8 @@ export class SessionConsumptionService {
       memberId: string;
       lyDo: LyDoTieuThu;
       xayRaLuc: Date;
+      /** Ghi vào dòng sổ cái — hội viên đọc được ở màn "Lịch sử". */
+      ghiChu?: string;
     },
   ): Promise<KetQuaTieuThu> {
     const ctx = requireContext();
@@ -86,6 +88,7 @@ export class SessionConsumptionService {
         reason: args.lyDo,
         ref_type: 'BOOKING',
         ref_id: args.bookingId,
+        note: args.ghiChu ?? null,
         created_by: ctx.identityId || null, // rỗng = worker tự đánh vắng
       })
       .execute();

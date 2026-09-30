@@ -206,6 +206,17 @@ export const TRANG_THAI_BUOI: Record<string, { text: string; tone: Tone }> = {
   CANCELLED_BY_STAFF: { text: 'Phòng tập huỷ', tone: 'neutral' },
 };
 
+/**
+ * Cách điểm danh. `ho: true` = điểm danh HỘ, không qua mã QR — hiện nổi bật để
+ * chủ phòng đối soát (người bấm cũng là người được hoa hồng dạy).
+ */
+export const CACH_DIEM_DANH: Record<string, { text: string; ho: boolean }> = {
+  QR: { text: 'Hội viên quét mã QR', ho: false },
+  MEMBER_CONFIRM: { text: 'Hội viên tự xác nhận', ho: false },
+  PT_CONFIRM: { text: 'HLV điểm danh hộ', ho: true },
+  ADMIN: { text: 'Phòng tập điểm danh hộ', ho: true },
+};
+
 export const TEN_GIOI_TINH: Record<string, string> = { MALE: 'Nam', FEMALE: 'Nữ', OTHER: 'Khác' };
 
 /** 0 = Chủ nhật, như `weekday` của API (và `Date.getDay()`). */

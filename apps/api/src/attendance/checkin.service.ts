@@ -131,16 +131,32 @@ export class CheckinService {
         });
       }
 
+      let method = dto.method;
+      let lyDoHo: string | null = null;
       if (dto.method === 'QR') {
         await this.assertToken(tx, bookingId, dto.token);
       } else if (dto.method === 'PT_CONFIRM' || dto.method === 'ADMIN') {
-        // Đường không có mã QR. Vẫn cho phép (mất điện thoại, hỏng camera),
-        // nhưng `checkin_by` được ghi lại và hội viên nhận thông báo ngay —
-        // đó là cơ chế đối soát thay cho mã QR.
+        // Điểm danh HỘ — không mã QR. Vẫn cho phép (quên điện thoại, hỏng
+        // camera), vì chặn hẳn thì người ta điểm danh bằng cách khác không
+        // để lại dấu vết. Đổi lại phải để lại ĐỦ dấu vết:
+        //   - ai bấm: checkin_by + audit_log
+        //   - vì sao: checkin_note (CSDL bắt buộc, xem 0021)
+        //   - hội viên thấy: lý do nằm trong dòng sổ cái ở màn "Lịch sử" của họ,
+        //     cộng tin Zalo "số buổi còn lại" như mọi lần điểm danh
         const laNhanVien = ctx.roles.some((r) => r === 'OWNER' || r === 'ADMIN' || r === 'RECEPTION');
         if (!laNhanVien && ctx.trainerId !== b.trainer_id) {
           throw new ForbiddenException('NOT_YOUR_BOOKING');
         }
+        if (!dto.reason) {
+          throw new BadRequestException({
+            code: 'CHECKIN_REASON_REQUIRED',
+            message: 'Điểm danh hộ phải ghi lý do hội viên không quét được mã',
+          });
+        }
+        // Phương thức theo VAI của người bấm, không theo client khai: HLV
+        // không được ghi là "phòng tập xác nhận" cho buổi mình ăn hoa hồng.
+        method = laNhanVien ? 'ADMIN' : 'PT_CONFIRM';
+        lyDoHo = dto.reason;
       }
       // Nhánh MEMBER_CONFIRM không cần kiểm riêng nữa: phép kiểm ở trên đã bao.
 
@@ -185,12 +201,27 @@ export class CheckinService {
         .set({
           status: 'CHECKED_IN',
           checkin_at: luc,
-          checkin_method: dto.method,
+          checkin_method: method,
+          checkin_note: lyDoHo,
           checkin_by: ctx.identityId,
           deducted: true,
         })
         .where('id', '=', bookingId)
         .execute();
+
+      if (lyDoHo) {
+        await tx
+          .insertInto('audit_log')
+          .values({
+            tenant_id: ctx.tenantId,
+            actor_id: ctx.identityId,
+            action: 'CHECKIN_MANUAL',
+            entity: 'booking',
+            entity_id: bookingId,
+            after: JSON.stringify({ method, reason: lyDoHo, memberId: b.member_id, trainerId: b.trainer_id }),
+          })
+          .execute();
+      }
 
       const kq = await this.consumption.consume(tx, {
         bookingId,
@@ -199,6 +230,9 @@ export class CheckinService {
         memberId: b.member_id,
         lyDo: 'CHECKIN',
         xayRaLuc: luc,
+        ghiChu: lyDoHo
+          ? `${method === 'ADMIN' ? 'Phòng tập' : 'Huấn luyện viên'} điểm danh hộ — ${lyDoHo}`
+          : undefined,
       });
 
       return {

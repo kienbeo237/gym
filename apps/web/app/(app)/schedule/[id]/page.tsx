@@ -5,7 +5,7 @@ import type { BookingItem } from '@pt/contracts';
 import { BookingActions } from '../../../../components/booking-actions';
 import { Badge, Card, PageHeader } from '../../../../components/ui';
 import { TZ, gioVN, ngayGioVN, ngayVN } from '../../../../lib/format';
-import { TRANG_THAI_BUOI } from '../../../../lib/labels';
+import { CACH_DIEM_DANH, TRANG_THAI_BUOI } from '../../../../lib/labels';
 import { apiFetch, requireSession } from '../../../../lib/session';
 
 export const metadata: Metadata = { title: 'Buổi tập' };
@@ -15,6 +15,7 @@ export default async function BookingPage({ params }: { params: Promise<{ id: st
   const { id } = await params;
   const b = await apiFetch<BookingItem>(`/bookings/${encodeURIComponent(id)}`, session);
   const n = TRANG_THAI_BUOI[b.status] ?? { text: b.status, tone: 'neutral' as const };
+  const cach = b.checkinMethod ? (CACH_DIEM_DANH[b.checkinMethod] ?? { text: b.checkinMethod, ho: false }) : null;
   // Người CHỈ là PT thì huỷ với tư cách PT; lễ tân / quản lý là STAFF. Cả hai
   // đều không trừ buổi — khác nhau ở trạng thái ghi lại (ai huỷ).
   const vai = session.roles.some((r) => r === 'OWNER' || r === 'ADMIN' || r === 'RECEPTION') ? 'STAFF' : 'PT';
@@ -72,7 +73,21 @@ export default async function BookingPage({ params }: { params: Promise<{ id: st
                 <dt>
                   <CalendarClock size={14} /> Điểm danh
                 </dt>
-                <dd>{ngayGioVN(b.checkinAt)}</dd>
+                <dd>
+                  {ngayGioVN(b.checkinAt)}
+                  {cach && (
+                    <>
+                      {' · '}
+                      {cach.ho ? <Badge tone="warning">{cach.text}</Badge> : <span className="muted">{cach.text}</span>}
+                    </>
+                  )}
+                </dd>
+              </div>
+            )}
+            {b.checkinNote && (
+              <div>
+                <dt>Lý do điểm danh hộ</dt>
+                <dd>{b.checkinNote}</dd>
               </div>
             )}
             {b.deducted && b.status !== 'CHECKED_IN' && b.status !== 'COMPLETED' && (

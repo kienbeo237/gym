@@ -48,6 +48,8 @@ export const BookingItem = z.object({
   sessionsRemaining: z.number().int(),
   checkinAt: z.string().nullable(),
   checkinMethod: z.string().nullable(),
+  /** Lý do điểm danh hộ (PT_CONFIRM / ADMIN); null với QR. */
+  checkinNote: z.string().nullable(),
   /** Buổi này đã trừ vào hợp đồng chưa. */
   deducted: z.boolean(),
   cancelReason: z.string().nullable(),
@@ -98,6 +100,12 @@ export const CheckinRequest = z.object({
    */
   token: z.string().min(16).max(200).optional(),
   method: z.enum(['QR', 'PT_CONFIRM', 'MEMBER_CONFIRM', 'ADMIN']).default('QR'),
+  /**
+   * BẮT BUỘC với điểm danh hộ (PT_CONFIRM / ADMIN): vì sao không quét được mã.
+   * Ghi vào buổi tập và vào lịch sử hội viên nhìn thấy — đó là chốt đối soát
+   * thay cho mã QR.
+   */
+  reason: z.string().trim().min(5).max(300).optional(),
 });
 export type CheckinRequest = z.infer<typeof CheckinRequest>;
 
