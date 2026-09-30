@@ -86,7 +86,7 @@ export class SessionConsumptionService {
         reason: args.lyDo,
         ref_type: 'BOOKING',
         ref_id: args.bookingId,
-        created_by: ctx.identityId,
+        created_by: ctx.identityId || null, // rỗng = worker tự đánh vắng
       })
       .execute();
 
@@ -182,7 +182,7 @@ export class SessionConsumptionService {
 
     // --- 5. hộp thư đi ----------------------------------------------------
     //
-    // Ghi TRONG transaction nghiệp vụ; worker gửi ở tiến trình khác (phase 6).
+    // Ghi TRONG transaction nghiệp vụ; worker gửi ở tiến trình khác (src/worker.ts).
     // Gọi HTTP tới Zalo ngay ở đây thì mạng chậm sẽ giữ khoá trên
     // member_package và kéo sập cả luồng điểm danh của phòng tập.
     await tx
@@ -199,6 +199,7 @@ export class SessionConsumptionService {
           total: sau.sessions_total,
           expiresOn: String(mp.expires_on),
           reason: args.lyDo,
+          occurredAt: args.xayRaLuc.toISOString(),
         }),
       })
       .onConflict((oc) => oc.doNothing())

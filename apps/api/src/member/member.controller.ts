@@ -1,7 +1,9 @@
-import { Body, Controller, Get, Post, Query } from '@nestjs/common';
+import { Body, Controller, Get, Param, ParseUUIDPipe, Patch, Post, Query } from '@nestjs/common';
 import {
   CreateMemberRequest,
   ListMemberQuery,
+  UpdateMemberRequest,
+  type MemberDetail,
   type MemberSummary,
   type Paged,
 } from '@pt/contracts';
@@ -25,5 +27,17 @@ export class MemberController {
   @Roles('OWNER', 'ADMIN', 'RECEPTION')
   create(@Body(new ZodPipe(CreateMemberRequest)) dto: CreateMemberRequest) {
     return this.members.create(dto);
+  }
+
+  @Get(':id')
+  @Roles('OWNER', 'ADMIN', 'RECEPTION', 'PT')
+  detail(@Param('id', ParseUUIDPipe) id: string): Promise<MemberDetail> {
+    return this.members.detail(id);
+  }
+
+  @Patch(':id')
+  @Roles('OWNER', 'ADMIN', 'RECEPTION')
+  update(@Param('id', ParseUUIDPipe) id: string, @Body(new ZodPipe(UpdateMemberRequest)) dto: UpdateMemberRequest) {
+    return this.members.update(id, dto);
   }
 }

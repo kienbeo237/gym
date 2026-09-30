@@ -121,11 +121,24 @@ export class MeService {
       // Cảnh báo tính ở BACKEND, không ở giao diện: ngưỡng phải giống hệt cái
       // mà chiến dịch nhắc gia hạn dùng, nếu không hội viên thấy "sắp hết" trên
       // màn hình mà không nhận tin, hoặc ngược lại.
+      //
+      // Nên ngưỡng ĐỌC TỪ chiến dịch đang bật của phòng; chỉ khi phòng không bật
+      // chiến dịch nào thì mới dùng mặc định.
+      const nguong = await tx
+        .selectFrom('campaign')
+        .select(['trigger_type', (eb) => eb.fn.max('threshold').as('n')])
+        .where('is_active', '=', true)
+        .where('trigger_type', 'in', ['LOW_SESSION_BALANCE', 'PACKAGE_EXPIRING'])
+        .groupBy('trigger_type')
+        .execute();
+      const nguongBuoi = nguong.find((r) => r.trigger_type === 'LOW_SESSION_BALANCE')?.n ?? 3;
+      const nguongNgay = nguong.find((r) => r.trigger_type === 'PACKAGE_EXPIRING')?.n ?? 14;
+
       const warnings: MySummary['warnings'] = [];
       for (const p of packages.filter((x) => x.status === 'ACTIVE')) {
         if (p.sessionsRemaining === 0) {
           warnings.push({ packageCode: p.code, kind: 'USED_UP', message: `Gói ${p.name} đã hết buổi tập.` });
-        } else if (p.sessionsRemaining <= 3) {
+        } else if (p.sessionsRemaining <= nguongBuoi) {
           warnings.push({
             packageCode: p.code, kind: 'LOW_SESSIONS',
             message: `Gói ${p.name} chỉ còn ${p.sessionsRemaining} buổi.`,
@@ -133,7 +146,7 @@ export class MeService {
         }
         if (p.daysLeft < 0) {
           warnings.push({ packageCode: p.code, kind: 'EXPIRED', message: `Gói ${p.name} đã hết hạn.` });
-        } else if (p.daysLeft <= 14) {
+        } else if (p.daysLeft <= nguongNgay) {
           warnings.push({
             packageCode: p.code, kind: 'EXPIRING',
             message: `Gói ${p.name} hết hạn sau ${p.daysLeft} ngày.`,

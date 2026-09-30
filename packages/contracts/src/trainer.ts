@@ -78,3 +78,31 @@ export const SetAvailabilityRequest = z.object({
   slots: z.array(AvailabilitySlot).max(50),
 });
 export type SetAvailabilityRequest = z.infer<typeof SetAvailabilityRequest>;
+
+/** Hồ sơ đầy đủ để sửa. Tên / SĐT / email thuộc định danh toàn cục — chỉ đọc ở đây. */
+export type TrainerDetail = {
+  id: string;
+  code: string;
+  fullName: string;
+  phone: string;
+  email: string | null;
+  level: string | null;
+  bio: string | null;
+  status: string;
+  baseSalary: number;
+  hiredOn: string | null;
+  leftOn: string | null;
+  /**
+   * Chính sách hoa hồng riêng MỚI NHẤT (có thể chưa tới ngày hiệu lực — đổi
+   * hôm nay thì áp từ ngày mai). null = theo mặc định của phòng.
+   */
+  commission: {
+    salePct: number;
+    teachMode: 'FIXED' | 'PCT';
+    teachFixedAmount: number;
+    teachPct: number;
+    effectiveFrom: string;
+  } | null;
+  availability: AvailabilitySlot[];
+  activePackages: number;
+};

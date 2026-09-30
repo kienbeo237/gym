@@ -1,7 +1,9 @@
 'use client';
 
 import { use, useCallback, useEffect, useRef, useState } from 'react';
+import Link from 'next/link';
 import QRCode from 'qrcode';
+import { ArrowLeft, CircleAlert, LoaderCircle, RefreshCw, Smartphone } from 'lucide-react';
 import type { CheckinTokenResponse } from '@pt/contracts';
 
 /** Mã sống 60 giây; làm mới sớm hơn vài giây để không bao giờ hiện mã đã chết. */
@@ -22,33 +24,46 @@ export default function CheckinQr({ params }: { params: Promise<{ bookingId: str
 
   const [anhQr, setAnhQr] = useState('');
   const [conLai, setConLai] = useState(0);
+  const [tongThoiGian, setTongThoiGian] = useState(60);
   const [loi, setLoi] = useState('');
+  const [dangTai, setDangTai] = useState(false);
+  // Buổi đã xong / đã huỷ: tạo lại mã cũng vô ích, nên ẩn nút và chỉ đường về lịch.
+  const [daDong, setDaDong] = useState(false);
   const dangChay = useRef(false);
 
   const xinMa = useCallback(async () => {
     if (dangChay.current) return;
     dangChay.current = true;
+    setDangTai(true);
     try {
       const res = await fetch(`/api/proxy/bookings/${bookingId}/checkin-token`, { method: 'POST' });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.message ?? 'Không mở được buổi tập');
+      if (!res.ok) {
+        if (data.code === 'BOOKING_NOT_CHECKINABLE') {
+          setDaDong(true);
+          throw new Error('Buổi tập này đã điểm danh, đã huỷ hoặc đã đánh vắng — không cần mã nữa.');
+        }
+        throw new Error(data.message ?? 'Không mở được buổi tập');
+      }
 
       const t = data as CheckinTokenResponse;
       const url = `${window.location.origin}/me/checkin?b=${t.bookingId}&t=${encodeURIComponent(t.token)}`;
       setAnhQr(
         await QRCode.toDataURL(url, {
-          width: 320,
+          width: 600,
           margin: 2,
           // Vùng trắng quanh mã là BẮT BUỘC để máy quét tách được ô — đừng cắt.
           color: { dark: '#0f1115', light: '#ffffff' },
         }),
       );
       setConLai(t.expiresInSeconds);
+      setTongThoiGian(t.expiresInSeconds);
       setLoi('');
     } catch (e) {
       setLoi(e instanceof Error ? e.message : 'Đã có lỗi xảy ra');
     } finally {
       dangChay.current = false;
+      setDangTai(false);
     }
   }, [bookingId]);
 
@@ -57,6 +72,8 @@ export default function CheckinQr({ params }: { params: Promise<{ bookingId: str
   }, [xinMa]);
 
   useEffect(() => {
+    // Đang lỗi thì thôi đếm — không tự gọi lại API mỗi vài giây vô ích.
+    if (loi) return;
     const id = setInterval(() => {
       setConLai((n) => {
         if (n <= LAM_MOI_TRUOC) {
@@ -67,45 +84,60 @@ export default function CheckinQr({ params }: { params: Promise<{ bookingId: str
       });
     }, 1000);
     return () => clearInterval(id);
-  }, [xinMa]);
+  }, [xinMa, loi]);
+
+  const pct = tongThoiGian > 0 ? Math.max(0, Math.min(100, (conLai / tongThoiGian) * 100)) : 0;
 
   return (
-    <main style={S.giua}>
-      <h1 style={S.h1}>Quét mã để điểm danh</h1>
-      <p style={S.sub}>Hội viên mở camera điện thoại và quét mã bên dưới.</p>
+    <>
+      <Link href="/schedule" className="back-link">
+        <ArrowLeft size={15} /> Lịch tập
+      </Link>
 
-      {loi ? (
-        <p style={S.loi}>{loi}</p>
-      ) : anhQr ? (
-        <>
-          <img src={anhQr} alt="Mã điểm danh" style={S.qr} />
-          <p style={S.dem}>
-            Mã tự làm mới sau <strong>{conLai}</strong> giây
+      <section className="card qr-card">
+        <div>
+          <h1 className="page-title">Quét mã để điểm danh</h1>
+          <p className="page-sub row-start" style={{ justifyContent: 'center', gap: 6, marginTop: 6 }}>
+            <Smartphone size={15} style={{ flexShrink: 0 }} /> Hội viên mở camera điện thoại và quét mã bên dưới.
           </p>
-        </>
-      ) : (
-        <p style={S.sub}>Đang tạo mã…</p>
-      )}
+        </div>
 
-      <button style={S.nut} onClick={() => void xinMa()}>
-        Tạo mã mới
-      </button>
-    </main>
+        {loi ? (
+          <div className="alert w-full" data-tone={daDong ? 'info' : 'danger'} role="alert" style={{ textAlign: 'left' }}>
+            <CircleAlert size={17} />
+            <div className="alert-body">{loi}</div>
+          </div>
+        ) : anhQr ? (
+          <>
+            <div className="qr-frame">
+              <img src={anhQr} alt="Mã QR điểm danh" />
+            </div>
+            <div className="countdown">
+              <div className="progress" data-tone={conLai <= 15 ? 'warning' : undefined}>
+                <span style={{ width: `${pct}%`, transition: 'width 1s linear' }} />
+              </div>
+              <p className="muted small">
+                Mã tự làm mới sau <strong className="num">{conLai}</strong> giây
+              </p>
+            </div>
+          </>
+        ) : (
+          <div className="qr-placeholder">
+            <LoaderCircle size={28} className="spin" />
+          </div>
+        )}
+
+        {daDong ? (
+          <Link href="/schedule" className="btn btn-secondary">
+            <ArrowLeft size={16} /> Về lịch tập
+          </Link>
+        ) : (
+          <button className="btn btn-secondary" onClick={() => void xinMa()} disabled={dangTai}>
+            <RefreshCw size={16} className={dangTai ? 'spin' : undefined} />
+            Tạo mã mới
+          </button>
+        )}
+      </section>
+    </>
   );
 }
-
-const S: Record<string, React.CSSProperties> = {
-  giua: {
-    display: 'flex', flexDirection: 'column', alignItems: 'center',
-    gap: 12, textAlign: 'center', paddingTop: 20,
-  },
-  h1: { margin: 0, fontSize: 22 },
-  sub: { margin: 0, fontSize: 13, color: '#8b93a7' },
-  qr: { width: 320, height: 320, borderRadius: 12, background: '#fff' },
-  dem: { margin: 0, fontSize: 13, color: '#8b93a7' },
-  loi: { margin: 0, fontSize: 14, color: '#f87171' },
-  nut: {
-    padding: '10px 18px', borderRadius: 8, border: '1px solid #2c3240',
-    background: '#171a21', color: '#e8ebf2', fontSize: 14, cursor: 'pointer',
-  },
-};

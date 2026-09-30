@@ -4,7 +4,7 @@
 #
 #   api    NestJS, chỉ dependency production (pnpm deploy)
 #   web    Next.js standalone
-#   tools  chạy migration / seed: `tsx db/migrate.ts up`
+#   tools  migration / seed (`tsx db/migrate.ts up`) và dịch vụ sao lưu (db/backup.ts)
 #
 # Build từ GỐC repo: cả ba cùng cần lockfile và gói workspace @pt/contracts.
 
@@ -33,8 +33,13 @@ RUN pnpm build
 RUN --mount=type=cache,id=pnpm-store,target=/pnpm/store \
     pnpm --filter @pt/api deploy --prod /out/api
 
-# ---- tools: migration + seed (cần tsx, pg, dotenv ở gốc workspace)
+# ---- tools: migration + seed + sao lưu (cần tsx, pg, dotenv, @aws-sdk/client-s3 ở gốc workspace)
 FROM deps AS tools
+# pg_dump/pg_restore cho db/backup.ts; postgres + contrib (citext, btree_gist,
+# pgcrypto) để khôi phục thử vào một cụm tạm. Major PHẢI >= image postgres trong
+# deploy/docker-compose.prod.yml — backup.ts từ chối chạy nếu pg_dump cũ hơn.
+RUN apk add --no-cache postgresql17 postgresql17-contrib postgresql17-client tzdata
+ENV TZ=Asia/Ho_Chi_Minh
 COPY db ./db
 CMD ["./node_modules/.bin/tsx", "db/migrate.ts", "up"]
 

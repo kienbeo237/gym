@@ -83,7 +83,11 @@ export type InvoiceDetail = z.infer<typeof InvoiceDetail>;
 export const RecordPaymentRequest = z.object({
   amount: Money.refine((v) => v > 0, 'Số tiền thu phải lớn hơn 0'),
   method: PaymentMethod,
-  /** Đợt trả góp được thu. Bỏ trống = thu tự do vào hoá đơn. */
+  /**
+   * Đợt trả góp được thu. Bỏ trống với hoá đơn trả góp = TỰ PHÂN BỔ: lấp đợt
+   * đến hạn sớm nhất còn thiếu trước, thừa thì sang đợt kế tiếp. Hoá đơn
+   * thường thì bỏ trống là thu tự do.
+   */
   scheduleId: z.string().uuid().optional(),
   reference: z.string().max(120).optional(),
   paidAt: z.string().datetime().optional(),
@@ -115,6 +119,13 @@ export const PaymentResult = z.object({
   invoiceStatus: InvoiceStatus,
   paidAmount: z.number().int(),
   outstanding: z.number().int(),
+  /**
+   * Lần thu được chia vào những đợt nào (tự phân bổ). Một phần tử khi thu
+   * đúng một đợt hoặc hoá đơn thường; `scheduleId` null = phần thu tự do.
+   */
+  allocations: z
+    .array(z.object({ scheduleId: z.string().uuid().nullable(), seq: z.number().int().nullable(), amount: z.number().int() }))
+    .optional(),
   /** Hoa hồng bán hàng phát sinh từ lần thu này (âm nếu là hoàn tiền). */
   commission: z.array(
     z.object({

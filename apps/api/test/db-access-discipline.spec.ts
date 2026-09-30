@@ -21,8 +21,11 @@ import { join, relative, sep } from 'node:path';
 
 const SRC = join(__dirname, '..', 'src');
 
-/** Chỉ những tệp này được chạm vào kết nối bỏ qua RLS. */
-const DUOC_DUNG_DB_PLATFORM = ['db/database.module.ts'];
+/**
+ * Chỉ những tệp này được chạm vào kết nối bỏ qua RLS. PlatformDb là cửa DUY
+ * NHẤT, và nó ghi nhật ký cho mọi lời gọi — xem platform-db.service.ts.
+ */
+const DUOC_DUNG_DB_PLATFORM = ['db/database.module.ts', 'platform/platform-db.service.ts'];
 /**
  * Chỉ luồng đăng nhập (chạy trước khi có tenant) được dùng app_auth.
  * `otp.service.ts` ở đây vì OTP là đường đăng nhập thứ hai: nó tra `identity`
@@ -90,6 +93,41 @@ describe('Kỷ luật truy cập CSDL', () => {
         `thêm tệp vào danh sách trong chính test này — để nó hiện ra trong review:\n` +
         viPham.join('\n'),
     ).toEqual([]);
+  });
+
+  it('PlatformDb chỉ được tiêm ở mặt phẳng nền tảng và worker', () => {
+    // PlatformDb ghi nhật ký, nhưng nó vẫn nhìn MỌI phòng tập. Service nghiệp
+    // vụ của phòng tập cầm nó là một đường đọc chéo phòng hợp lệ về kỹ thuật —
+    // và vô hình trong review nếu không có dòng này.
+    const DUOC = [
+      'platform/platform-db.service.ts',
+      'platform/platform.service.ts',
+      'platform/platform.module.ts',
+      'worker/scheduler.service.ts',
+      'worker/worker.module.ts',
+    ];
+    const viPham: string[] = [];
+    for (const f of FILES) {
+      if (DUOC.includes(f.rel)) continue;
+      for (const { no, text } of codeLines(f.abs)) {
+        if (/\bPlatformDb(Module)?\b/.test(text)) viPham.push(`${f.rel}:${no}  ${text.trim()}`);
+      }
+    }
+    expect(viPham, `PlatformDb dùng ngoài mặt phẳng nền tảng:\n${viPham.join('\n')}`).toEqual([]);
+  });
+
+  it('mọi controller dưới /platform đều gắn @Platform() ở CLASS', () => {
+    // Gắn ở từng method thì một route mới quên gắn sẽ rơi về guard phòng tập —
+    // bị chặn vì token nền tảng không có tid, NHƯNG chỉ nhờ may. Gắn ở class
+    // thì route mới mặc định đã đúng.
+    const tep = FILES.filter((f) => f.rel.startsWith('platform/') && f.rel.endsWith('.controller.ts'));
+    expect(tep.length).toBeGreaterThan(0);
+    for (const f of tep) {
+      const src = readFileSync(f.abs, 'utf8');
+      const soController = (src.match(/@Controller\(/g) ?? []).length;
+      const soGac = (src.match(/@Controller\([^)]*\)\s*\n\s*@Platform\(/g) ?? []).length;
+      expect(soGac, `${f.rel}: có @Controller không đi kèm @Platform() ngay dưới`).toBe(soController);
+    }
   });
 
   it('không nơi nào đặt app.tenant_id bằng SET (phải là set_config LOCAL)', () => {

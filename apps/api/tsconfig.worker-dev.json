@@ -1,0 +1,8 @@
+{
+  // CHỈ cho `pnpm dev:worker`. nest-cli bật deleteOutDir: hai tiến trình
+  // `nest start --watch` cùng ghi ./dist sẽ xoá bản build của nhau. Build
+  // production vẫn một lần, một thư mục dist chứa cả main.js lẫn worker.js.
+  "extends": "./tsconfig.json",
+  "compilerOptions": { "outDir": "./dist-worker" },
+  "exclude": ["node_modules", "dist", "dist-worker", "test"]
+}

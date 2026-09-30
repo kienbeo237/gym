@@ -1,14 +1,18 @@
 import { Body, Controller, Get, Param, ParseUUIDPipe, Post, Query } from '@nestjs/common';
 import {
+  AvailableSlotsQuery,
   CancelBookingRequest,
   CheckinRequest,
   CreateBookingRequest,
   ListBookingQuery,
   MarkNoShowRequest,
+  RescheduleBookingRequest,
+  type AvailableSlots,
   type BookingItem,
   type CancelBookingResponse,
   type CheckinResponse,
   type CheckinTokenResponse,
+  type RescheduleBookingResponse,
 } from '@pt/contracts';
 import { BookingService } from './booking.service';
 import { CheckinService } from './checkin.service';
@@ -31,6 +35,19 @@ export class AttendanceController {
     return this.bookings.list(q);
   }
 
+  /** Khung giờ trống của người dạy một hợp đồng. Hội viên chỉ hỏi được hợp đồng của mình. */
+  @Get('slots')
+  @Roles('OWNER', 'ADMIN', 'RECEPTION', 'PT', 'MEMBER')
+  slots(@Query(new ZodPipe(AvailableSlotsQuery)) q: AvailableSlotsQuery): Promise<AvailableSlots> {
+    return this.bookings.slots(q);
+  }
+
+  @Get(':id')
+  @Roles('OWNER', 'ADMIN', 'RECEPTION', 'PT', 'MEMBER')
+  get(@Param('id', ParseUUIDPipe) id: string): Promise<BookingItem> {
+    return this.bookings.get(id);
+  }
+
   @Post()
   @Roles('OWNER', 'ADMIN', 'RECEPTION', 'PT', 'MEMBER')
   create(@Body(new ZodPipe(CreateBookingRequest)) dto: CreateBookingRequest) {
@@ -44,6 +61,16 @@ export class AttendanceController {
     @Body(new ZodPipe(CancelBookingRequest)) dto: CancelBookingRequest,
   ): Promise<CancelBookingResponse> {
     return this.bookings.cancel(id, dto);
+  }
+
+  /** Đổi giờ buổi đang chờ — giữ nguyên buổi, không trừ buổi. */
+  @Post(':id/reschedule')
+  @Roles('OWNER', 'ADMIN', 'RECEPTION', 'PT', 'MEMBER')
+  reschedule(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body(new ZodPipe(RescheduleBookingRequest)) dto: RescheduleBookingRequest,
+  ): Promise<RescheduleBookingResponse> {
+    return this.bookings.reschedule(id, dto);
   }
 
   // Đánh dấu vắng mặt là thao tác TRỪ BUỔI của khách — không để hội viên tự làm.

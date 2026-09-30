@@ -52,6 +52,11 @@ export const BookingItem = z.object({
   deducted: z.boolean(),
   cancelReason: z.string().nullable(),
   note: z.string().nullable(),
+  /**
+   * Khung huỷ muộn (giờ) của hợp đồng — đã gộp chính sách gói và phòng. Để màn
+   * hình báo trước "huỷ bây giờ sẽ bị trừ buổi" thay vì chỉ báo sau khi huỷ.
+   */
+  lateCancelHours: z.number().int(),
 });
 export type BookingItem = z.infer<typeof BookingItem>;
 
@@ -114,3 +119,69 @@ export const MarkNoShowRequest = z.object({
   note: z.string().max(500).optional(),
 });
 export type MarkNoShowRequest = z.infer<typeof MarkNoShowRequest>;
+
+// ---- Chính sách đặt lịch của phòng (Cài đặt → Đặt lịch) -----------------------
+
+export type BookingPolicy = {
+  lateCancelHours: number;
+  lateCancelDeducts: boolean;
+  noShowDeducts: boolean;
+  bookingWindowDays: number;
+  checkinGraceMinutes: number;
+  /** Máy tự đánh vắng khi cửa sổ điểm danh đã đóng. Tắt mặc định — đây là thao tác trừ buổi. */
+  autoNoShow: boolean;
+  /** Số phút sau giờ bắt đầu thì cửa sổ điểm danh đóng (= ân hạn + 240). Chỉ đọc. */
+  checkinWindowCloseMinutes: number;
+};
+
+export const UpdateBookingPolicy = z.object({
+  lateCancelHours: z.number().int().min(0).max(168),
+  lateCancelDeducts: z.boolean(),
+  noShowDeducts: z.boolean(),
+  bookingWindowDays: z.number().int().min(1).max(365),
+  checkinGraceMinutes: z.number().int().min(0).max(240),
+  autoNoShow: z.boolean(),
+});
+export type UpdateBookingPolicy = z.infer<typeof UpdateBookingPolicy>;
+
+// ---- Khung giờ trống (hội viên tự đặt, lễ tân đặt nhanh) ------------------------
+
+export const AvailableSlotsQuery = z.object({
+  memberPackageId: z.string().uuid(),
+  /** Ngày đầu (giờ Việt Nam). */
+  from: z.string().date(),
+  days: z.coerce.number().int().min(1).max(14).default(7),
+  durationMinutes: z.coerce.number().int().min(15).max(240).default(60),
+  /** Bỏ trống = huấn luyện viên phụ trách hợp đồng. Hội viên không chọn được người khác. */
+  trainerId: z.string().uuid().optional(),
+});
+export type AvailableSlotsQuery = z.infer<typeof AvailableSlotsQuery>;
+
+export type AvailableSlots = {
+  trainerId: string;
+  trainerName: string;
+  durationMinutes: number;
+  /**
+   * HLV đã khai khung giờ nhận dạy chưa. Chưa khai thì gợi ý theo giờ mở cửa
+   * mặc định (06:00–21:00) — đặt ngoài khung đó vẫn được, như API đặt lịch.
+   */
+  hasAvailability: boolean;
+  /** Hợp đồng còn đặt thêm được bao nhiêu buổi (còn lại − đã đặt chưa tập). */
+  bookableSessions: number;
+  days: { date: string; slots: { startsAt: string; endsAt: string }[] }[];
+};
+
+/**
+ * Đổi giờ một buổi ĐANG CHỜ. Giữ nguyên buổi (không huỷ + đặt lại) nên không
+ * bao giờ trừ buổi. Hội viên chỉ đổi được khi còn ngoài khung huỷ muộn — trong
+ * khung đó thì đổi lịch chính là huỷ muộn trá hình.
+ */
+export const RescheduleBookingRequest = z.object({
+  startsAt: z.string().datetime(),
+  /** Bỏ trống = giữ nguyên thời lượng cũ. */
+  durationMinutes: z.number().int().min(15).max(240).optional(),
+  reason: z.string().trim().max(500).optional(),
+});
+export type RescheduleBookingRequest = z.infer<typeof RescheduleBookingRequest>;
+
+export type RescheduleBookingResponse = { id: string; startsAt: string; endsAt: string };

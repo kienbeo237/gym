@@ -5,11 +5,13 @@ import type {
   ListTrainerQuery,
   Paged,
   SetAvailabilityRequest,
+  TrainerDetail,
   TrainerSummary,
   UpdateTrainerRequest,
 } from '@pt/contracts';
 import { TenantDb, type Tx } from '../common/tenant-db.service';
 import { requireContext } from '../common/tenant-context';
+import { loiHanMucGoi } from '../common/saas-policy';
 
 @Injectable()
 export class TrainerService {
@@ -106,21 +108,71 @@ export class TrainerService {
     });
   }
 
+  async detail(id: string): Promise<TrainerDetail> {
+    return this.tdb.run(async (tx) => {
+      const t = await tx
+        .selectFrom('trainer as t')
+        .innerJoin('identity as i', 'i.id', 't.identity_id')
+        .select([
+          't.id', 't.code', 'i.full_name as fullName', 'i.phone', 'i.email', 't.level', 't.bio', 't.status',
+          't.base_salary as baseSalary', 't.hired_on as hiredOn', 't.left_on as leftOn',
+        ])
+        .where('t.id', '=', id)
+        .executeTakeFirst();
+      if (!t) throw new NotFoundException('TRAINER_NOT_FOUND');
+
+      // Bản ghi riêng của PT (không theo gói) mới nhất còn mở — có thể là bản
+      // "từ ngày mai" vừa đổi hôm nay. Màn sửa phải hiện đúng con số đã nhập.
+      const cs = await tx
+        .selectFrom('commission_policy')
+        .select(['sale_pct', 'teach_mode', 'teach_fixed_amount', 'teach_pct', 'effective_from'])
+        .where('trainer_id', '=', id)
+        .where('package_template_id', 'is', null)
+        .where('effective_to', 'is', null)
+        .orderBy('effective_from', 'desc')
+        .executeTakeFirst();
+
+      const goi = await tx
+        .selectFrom('member_package')
+        .select((eb) => eb.fn.countAll<string>().as('c'))
+        .where('trainer_id', '=', id)
+        .where('status', '=', 'ACTIVE')
+        .executeTakeFirstOrThrow();
+
+      return {
+        id: t.id,
+        code: t.code,
+        fullName: t.fullName,
+        phone: t.phone,
+        email: t.email,
+        level: t.level,
+        bio: t.bio,
+        status: t.status,
+        baseSalary: Number(t.baseSalary),
+        hiredOn: t.hiredOn ? String(t.hiredOn) : null,
+        leftOn: t.leftOn ? String(t.leftOn) : null,
+        commission: cs
+          ? {
+              salePct: Number(cs.sale_pct),
+              teachMode: cs.teach_mode as 'FIXED' | 'PCT',
+              teachFixedAmount: Number(cs.teach_fixed_amount),
+              teachPct: Number(cs.teach_pct),
+              effectiveFrom: String(cs.effective_from),
+            }
+          : null,
+        availability: await this.getAvailability(id),
+        activePackages: Number(goi.c),
+      };
+    });
+  }
+
   async create(dto: CreateTrainerRequest): Promise<{ id: string; code: string }> {
     const ctx = requireContext();
 
     return this.tdb.run(async (tx) => {
-      try {
-        await sql`SELECT assert_quota(${ctx.tenantId}::uuid, 'trainer')`.execute(tx);
-      } catch (e) {
-        if (String(e instanceof Error ? e.message : e).includes('QUOTA_EXCEEDED')) {
-          throw new BadRequestException({
-            code: 'QUOTA_EXCEEDED',
-            message: 'Đã đạt số huấn luyện viên tối đa của gói dịch vụ hiện tại',
-          });
-        }
-        throw e;
-      }
+      await sql`SELECT assert_quota(${ctx.tenantId}::uuid, 'trainer')`
+        .execute(tx)
+        .catch((e: unknown) => loiHanMucGoi(e, 'trainer'));
 
       // Cùng cửa hẹp như bên hội viên: PT có thể đã dạy ở phòng khác.
       const resolved = await sql<{ id: string }>`
@@ -192,21 +244,34 @@ export class TrainerService {
         .executeTakeFirst();
       if (!truoc) throw new NotFoundException('TRAINER_NOT_FOUND');
 
-      await tx
-        .updateTable('trainer')
-        .set({
-          ...(dto.level !== undefined ? { level: dto.level } : {}),
-          ...(dto.bio !== undefined ? { bio: dto.bio } : {}),
-          ...(dto.baseSalary !== undefined ? { base_salary: dto.baseSalary } : {}),
-          ...(dto.hiredOn !== undefined ? { hired_on: dto.hiredOn } : {}),
-        })
-        .where('id', '=', id)
-        .execute();
+      const doi = {
+        ...(dto.level !== undefined ? { level: dto.level } : {}),
+        ...(dto.bio !== undefined ? { bio: dto.bio } : {}),
+        ...(dto.baseSalary !== undefined ? { base_salary: dto.baseSalary } : {}),
+        ...(dto.hiredOn !== undefined ? { hired_on: dto.hiredOn } : {}),
+      };
+      // Chỉ đổi hoa hồng thì không có cột nào của `trainer` để SET — Kysely vẫn
+      // sinh `UPDATE trainer SET WHERE …` và PostgreSQL báo lỗi cú pháp (500).
+      if (Object.keys(doi).length > 0) {
+        await tx.updateTable('trainer').set(doi).where('id', '=', id).execute();
+      }
 
       if (dto.commission) {
         // Chính sách hoa hồng là BẢN GHI CÓ HIỆU LỰC THEO NGÀY, không sửa tại chỗ:
         // hoa hồng đã tính của tháng trước phải giữ nguyên căn cứ của nó.
         // (commission_entry còn chụp ảnh riêng, đây là lớp thứ hai.)
+        //
+        // Bản "từ ngày mai" của một lần đổi TRƯỚC ĐÓ trong hôm nay chưa từng có
+        // hiệu lực — không có lịch sử nào cần giữ, nên thay hẳn. Thiếu bước này
+        // thì đổi lần hai trong ngày vỡ: đóng bản đó bằng effective_to = hôm nay
+        // < effective_from = mai (comm_policy_date_order), và bản mới trùng
+        // effective_from với nó (uq_comm_policy_open).
+        await tx
+          .deleteFrom('commission_policy')
+          .where('trainer_id', '=', id)
+          .where('package_template_id', 'is', null)
+          .where('effective_from', '>', sql<string>`current_date`)
+          .execute();
         await tx
           .updateTable('commission_policy')
           .set({ effective_to: sql`current_date` })

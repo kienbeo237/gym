@@ -8,13 +8,54 @@
 # Tệp lưu ở S3 BÊN NGOÀI (CMC Cloud) — trình duyệt PUT thẳng lên đó qua URL ký
 # sẵn, nên bucket phải bật CORS cho https://DOMAIN.
 #
-# Chỉ API và web mở cổng, và chỉ trên 127.0.0.1 — nginx của máy chủ đứng trước
-# (xem deploy/nginx/gym.conf). Postgres/Redis không mở cổng ra ngoài.
+# Chỉ API và web mở cổng (worker thì không), và chỉ trên 127.0.0.1 — nginx của
+# máy chủ đứng trước (xem deploy/nginx/gym.conf). Postgres/Redis không mở cổng ra ngoài.
 name: gym-pt
 
 x-logging: &logging
   driver: json-file
   options: { max-size: '10m', max-file: '3' }
+
+# API và worker dùng CHUNG một bộ cấu hình: cùng image, cùng quyền CSDL,
+# khác lệnh chạy. Khai hai lần là hai lần lệch nhau.
+x-api-env: &api-env
+  NODE_ENV: production
+  API_PORT: '4000'
+  # API chạy bằng role BỊ RLS áp. Không bao giờ trỏ về pt_migrator.
+  DATABASE_URL_APP: postgres://app_rw:${APP_DB_PASSWORD}@postgres:5432/pt
+  DATABASE_URL_AUTH: postgres://app_auth:${APP_DB_PASSWORD}@postgres:5432/pt
+  DATABASE_URL_PLATFORM: postgres://app_platform:${APP_DB_PASSWORD}@postgres:5432/pt
+  REDIS_HOST: redis
+  REDIS_PORT: '6379'
+  REDIS_PASSWORD: ${REDIS_PASSWORD}
+  # Endpoint CÔNG KHAI: URL ký sẵn được ký theo host này và trình duyệt gọi
+  # thẳng tới nó.
+  S3_ENDPOINT: ${S3_ENDPOINT:?Điền S3_ENDPOINT trong .env}
+  S3_REGION: ${S3_REGION:?}
+  S3_BUCKET: ${S3_BUCKET:?}
+  S3_ACCESS_KEY: ${S3_ACCESS_KEY:?}
+  S3_SECRET_KEY: ${S3_SECRET_KEY:?}
+  S3_FORCE_PATH_STYLE: ${S3_FORCE_PATH_STYLE:-true}
+  JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:?}
+  JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:?}
+  JWT_ACCESS_TTL_SECONDS: '900'
+  JWT_REFRESH_TTL_DAYS: '30'
+  TENANT_SECRET_KEY: ${TENANT_SECRET_KEY:?}
+  APP_BASE_DOMAIN: ${DOMAIN}
+  WEB_ORIGIN: https://${DOMAIN}
+  DEFAULT_TIMEZONE: Asia/Ho_Chi_Minh
+  # Zalo: production luôn gọi Zalo thật. ZALO_ZNS_DEV_MODE=1 để gửi ZNS ở chế
+  # độ "development" của Zalo khi chạy thử (xem tài liệu ZNS về giới hạn).
+  ZALO_DRIVER: ${ZALO_DRIVER:-http}
+  ZALO_ZNS_DEV_MODE: ${ZALO_ZNS_DEV_MODE:-0}
+  ZALO_OAUTH_BASE: ${ZALO_OAUTH_BASE:-}
+  ZALO_ZNS_URL: ${ZALO_ZNS_URL:-}
+  # Tài khoản nhận tiền gói SaaS — hiện cho chủ phòng trên màn "Gói dịch vụ".
+  SAAS_BANK_NAME: ${SAAS_BANK_NAME:-}
+  SAAS_BANK_ACCOUNT: ${SAAS_BANK_ACCOUNT:-}
+  SAAS_BANK_HOLDER: ${SAAS_BANK_HOLDER:-}
+  SAAS_SUPPORT_CONTACT: ${SAAS_SUPPORT_CONTACT:-}
+  SEPAY_WEBHOOK_KEY: ${SEPAY_WEBHOOK_KEY:-}
 
 services:
   postgres:
@@ -22,8 +63,13 @@ services:
     restart: unless-stopped
     logging: *logging
     environment:
-      POSTGRES_USER: pt_migrator
-      POSTGRES_PASSWORD: ${DB_PASSWORD:?}
+      # Superuser dự phòng — không dịch vụ nào đăng nhập bằng nó. Chủ schema là
+      # pt_migrator KHÔNG superuser, do postgres-init/01-roles.sh tạo. Ba biến
+      # dưới chỉ được đọc khi volume còn TRỐNG; máy dựng trước thay đổi này thì
+      # chạy db/demote-migrator.ts một lần (deploy/README.md).
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${DB_SUPERUSER_PASSWORD:-}
+      MIGRATOR_DB_PASSWORD: ${DB_PASSWORD:?}
       # Mật khẩu ba role ứng dụng, dùng bởi postgres-init/01-roles.sh (chỉ chạy
       # khi volume còn trống).
       APP_DB_PASSWORD: ${APP_DB_PASSWORD:?}
@@ -61,33 +107,30 @@ services:
     depends_on:
       postgres: { condition: service_healthy }
       redis: { condition: service_healthy }
-    environment:
-      NODE_ENV: production
-      API_PORT: '4000'
-      # API chạy bằng role BỊ RLS áp. Không bao giờ trỏ về pt_migrator.
-      DATABASE_URL_APP: postgres://app_rw:${APP_DB_PASSWORD}@postgres:5432/pt
-      DATABASE_URL_AUTH: postgres://app_auth:${APP_DB_PASSWORD}@postgres:5432/pt
-      DATABASE_URL_PLATFORM: postgres://app_platform:${APP_DB_PASSWORD}@postgres:5432/pt
-      REDIS_HOST: redis
-      REDIS_PORT: '6379'
-      REDIS_PASSWORD: ${REDIS_PASSWORD}
-      # Endpoint CÔNG KHAI: URL ký sẵn được ký theo host này và trình duyệt gọi
-      # thẳng tới nó.
-      S3_ENDPOINT: ${S3_ENDPOINT:?Điền S3_ENDPOINT trong .env}
-      S3_REGION: ${S3_REGION:?}
-      S3_BUCKET: ${S3_BUCKET:?}
-      S3_ACCESS_KEY: ${S3_ACCESS_KEY:?}
-      S3_SECRET_KEY: ${S3_SECRET_KEY:?}
-      S3_FORCE_PATH_STYLE: ${S3_FORCE_PATH_STYLE:-true}
-      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:?}
-      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:?}
-      JWT_ACCESS_TTL_SECONDS: '900'
-      JWT_REFRESH_TTL_DAYS: '30'
-      TENANT_SECRET_KEY: ${TENANT_SECRET_KEY:?}
-      APP_BASE_DOMAIN: ${DOMAIN}
-      WEB_ORIGIN: https://${DOMAIN}
-      DEFAULT_TIMEZONE: Asia/Ho_Chi_Minh
+    environment: *api-env
     ports: ['127.0.0.1:${API_HOST_PORT:-4210}:4000']
+
+  # Gửi tin Zalo, chạy chiến dịch, làm mới token OA, làm tươi báo cáo, dọn tệp.
+  # Không mở cổng. Chạy 2 bản vẫn đúng (hàng đợi dùng SKIP LOCKED, job định kỳ
+  # dùng khoá Redis) nhưng không cần.
+  worker:
+    image: ${IMAGE_PREFIX:?}-api:${IMAGE_TAG:?}
+    restart: unless-stopped
+    logging: *logging
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+    environment: *api-env
+    command: ['node', 'dist/worker.js']
+    # Ghi đè healthcheck HTTP của image API: worker không nghe cổng nào. Vòng
+    # gửi tin chạm tệp nhịp tim mỗi ~3 giây; quá 1 phút không chạm là treo.
+    healthcheck:
+      test: ['CMD-SHELL', 'test -n "$$(find /tmp/pt-worker.alive -mmin -1 2>/dev/null)"']
+      interval: 15s
+      timeout: 5s
+      start_period: 30s
+      retries: 3
+    stop_grace_period: 20s
 
   web:
     image: ${IMAGE_PREFIX:?}-web:${IMAGE_TAG:?}
@@ -100,6 +143,60 @@ services:
       # Server Component và /api/proxy gọi API qua mạng nội bộ của compose.
       API_INTERNAL_URL: http://api:4000/api
     ports: ['127.0.0.1:${WEB_HOST_PORT:-3210}:3000']
+
+  # Sao lưu CSDL hằng ngày lúc BACKUP_TIME: pg_dump -> ./backups (giữ
+  # BACKUP_KEEP_LOCAL bản) -> mã hoá AES-256-GCM -> S3 (xoay vòng ngày/tháng).
+  # Mỗi BACKUP_VERIFY_EVERY_DAYS ngày khôi phục thử vào một cụm Postgres TẠM
+  # trong container và so số dòng từng bảng. Lỗi -> BACKUP_ALERT_WEBHOOK.
+  # Chi tiết: db/backup.ts, deploy/README.md mục "Sao lưu".
+  backup:
+    image: ${IMAGE_PREFIX:?}-tools:${IMAGE_TAG:?}
+    restart: unless-stopped
+    logging: *logging
+    depends_on:
+      postgres: { condition: service_healthy }
+    environment:
+      TZ: Asia/Ho_Chi_Minh
+      # Chủ schema: đọc được MỌI bảng (BYPASSRLS) — pg_dump bằng role bị RLS áp sẽ thiếu dữ liệu.
+      DATABASE_URL: postgres://pt_migrator:${DB_PASSWORD}@postgres:5432/pt
+      BACKUP_DIR: /backups
+      BACKUP_LABEL: ${DOMAIN:-gym-pt}
+      BACKUP_TIME: ${BACKUP_TIME:-02:30}
+      BACKUP_KEEP_LOCAL: ${BACKUP_KEEP_LOCAL:-7}
+      BACKUP_KEEP_DAILY: ${BACKUP_KEEP_DAILY:-14}
+      BACKUP_KEEP_MONTHLY: ${BACKUP_KEEP_MONTHLY:-12}
+      BACKUP_VERIFY_EVERY_DAYS: ${BACKUP_VERIFY_EVERY_DAYS:-7}
+      BACKUP_ALERT_WEBHOOK: ${BACKUP_ALERT_WEBHOOK:-}
+      # GET sau mỗi lần thành công (healthchecks.io…) — báo động cả khi container chết hẳn.
+      BACKUP_HEARTBEAT_URL: ${BACKUP_HEARTBEAT_URL:-}
+      BACKUP_ENCRYPTION_KEY: ${BACKUP_ENCRYPTION_KEY:?Thiếu BACKUP_ENCRYPTION_KEY — deploy.sh sinh}
+      BACKUP_S3: ${BACKUP_S3:-1}
+      BACKUP_S3_PREFIX: ${BACKUP_S3_PREFIX:-backups/pt/}
+      # Rỗng -> dùng S3_* của ứng dụng. Nên đặt bucket + khoá RIÊNG: khoá của
+      # API bị lộ thì kẻ tấn công không xoá được luôn bản sao lưu.
+      BACKUP_S3_ENDPOINT: ${BACKUP_S3_ENDPOINT:-}
+      BACKUP_S3_REGION: ${BACKUP_S3_REGION:-}
+      BACKUP_S3_BUCKET: ${BACKUP_S3_BUCKET:-}
+      BACKUP_S3_ACCESS_KEY: ${BACKUP_S3_ACCESS_KEY:-}
+      BACKUP_S3_SECRET_KEY: ${BACKUP_S3_SECRET_KEY:-}
+      BACKUP_S3_FORCE_PATH_STYLE: ${BACKUP_S3_FORCE_PATH_STYLE:-}
+      S3_ENDPOINT: ${S3_ENDPOINT:-}
+      S3_REGION: ${S3_REGION:-}
+      S3_BUCKET: ${S3_BUCKET:-}
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY:-}
+      S3_SECRET_KEY: ${S3_SECRET_KEY:-}
+      S3_FORCE_PATH_STYLE: ${S3_FORCE_PATH_STYLE:-true}
+    volumes: ['./backups:/backups']
+    command: ['./node_modules/.bin/tsx', 'db/backup.ts', 'daemon']
+    # Đỏ khi bản thành công gần nhất cũ hơn 26 giờ. Mới dựng thì daemon chạy
+    # bù sau 1 phút, nên start_period 10 phút là đủ.
+    healthcheck:
+      test: ['CMD-SHELL', 'test -n "$$(find /backups/.ok -mmin -1560 2>/dev/null)"']
+      interval: 5m
+      timeout: 10s
+      start_period: 10m
+      retries: 1
+    stop_grace_period: 30s
 
   # ---- Tác vụ một lần: `docker compose run --rm migrate|seed` ----------------
   migrate:

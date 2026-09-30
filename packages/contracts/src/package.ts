@@ -59,6 +59,8 @@ export const PackageSummary = z.object({
   pricePerSession: z.number().int(),
   isActive: z.boolean(),
   sortOrder: z.number().int(),
+  /** Mô tả hiển thị cho khách (tuỳ chọn). */
+  description: z.string().nullable(),
   /** Số hợp đồng đã bán từ mẫu này. Khác 0 thì không xoá được. */
   soldCount: z.number().int(),
   /** Chính sách hiệu lực sau khi gộp mặc định của phòng. */

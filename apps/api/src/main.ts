@@ -10,7 +10,12 @@ async function bootstrap(): Promise<void> {
   // bí mật mà cả thế giới đọc được trong .env.example.
   assertCauHinhSanSang();
 
-  const app = await NestFactory.create(AppModule, { bufferLogs: false });
+  const app = await NestFactory.create(AppModule, {
+    bufferLogs: false,
+    // Webhook Zalo ký trên THÂN THÔ của request — JSON đã parse rồi stringify lại
+    // không còn khớp từng byte.
+    rawBody: true,
+  });
   app.use(helmet());
   app.setGlobalPrefix('api');
   app.enableCors({

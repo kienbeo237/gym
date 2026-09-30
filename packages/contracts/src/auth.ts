@@ -35,13 +35,43 @@ export const TenantOption = z.object({
 });
 export type TenantOption = z.infer<typeof TenantOption>;
 
+/** Cấp quản trị nền tảng. SUPPORT chỉ xem; OPS thu tiền, đổi gói, khoá; SUPER đóng phòng. */
+export const PlatformLevel = z.enum(['SUPPORT', 'OPS', 'SUPER']);
+export type PlatformLevel = z.infer<typeof PlatformLevel>;
+
 export const LoginResponse = z.object({
   preToken: z.string(),
   identityId: z.string().uuid(),
   fullName: z.string(),
   tenants: z.array(TenantOption),
+  /**
+   * Có khi người này là quản trị nền tảng VÀ đăng nhập bằng MẬT KHẨU. Đăng nhập
+   * bằng OTP không mở được cửa nền tảng: mã OTP đi qua Zalo OA của một phòng
+   * tập, tức phòng tập đó (và ai cầm điện thoại) nắm được một nửa khoá.
+   */
+  platform: z.object({ level: PlatformLevel }).nullable(),
+  /**
+   * true = đang dùng MẬT KHẨU TẠM. Khi đó `preToken` chỉ đổi được mật khẩu
+   * (POST /auth/change-password), `tenants` rỗng và `platform` null — chưa vào
+   * được đâu cho tới khi đặt mật khẩu của riêng mình.
+   */
+  mustChangePassword: z.boolean(),
 });
 export type LoginResponse = z.infer<typeof LoginResponse>;
+
+/**
+ * Mật khẩu mới: tối thiểu 8 ký tự, có cả chữ lẫn số. Không bắt ký tự đặc biệt —
+ * luật rườm rà chỉ đẩy người dùng tới "Matkhau@1" dán ở cạnh màn hình.
+ */
+export const NewPassword = z
+  .string()
+  .min(8, 'Mật khẩu cần ít nhất 8 ký tự')
+  .max(72, 'Mật khẩu tối đa 72 ký tự')
+  .regex(/[A-Za-z]/, 'Mật khẩu cần có chữ cái')
+  .regex(/[0-9]/, 'Mật khẩu cần có chữ số');
+
+export const ChangePasswordRequest = z.object({ newPassword: NewPassword });
+export type ChangePasswordRequest = z.infer<typeof ChangePasswordRequest>;
 
 export const SelectTenantRequest = z.object({ tenantId: z.string().uuid() });
 export type SelectTenantRequest = z.infer<typeof SelectTenantRequest>;
@@ -56,6 +86,17 @@ export const SessionResponse = z.object({
 });
 export type SessionResponse = z.infer<typeof SessionResponse>;
 
+/** Phiên quản trị nền tảng — KHÔNG có tenant, không mở được route nghiệp vụ nào. */
+export const PlatformSessionResponse = z.object({
+  accessToken: z.string(),
+  refreshToken: z.string(),
+  expiresIn: z.number().int(),
+  identityId: z.string().uuid(),
+  fullName: z.string(),
+  level: PlatformLevel,
+});
+export type PlatformSessionResponse = z.infer<typeof PlatformSessionResponse>;
+
 /** Nội dung access token. `tid` là thứ duy nhất RLS tin. */
 export type AccessTokenClaims = {
   sub: string;          // identity id
@@ -67,10 +108,25 @@ export type AccessTokenClaims = {
   exp: number;
 };
 
+/**
+ * Access token của quản trị nền tảng. Không có `tid` nên guard tự từ chối nó ở
+ * mọi route nghiệp vụ; chỉ route gắn @Platform() nhận nó.
+ */
+export type PlatformTokenClaims = {
+  sub: string;
+  scope: 'platform';
+  pa: PlatformLevel;
+  iat: number;
+  exp: number;
+};
+
 /** Token giữa hai bước, KHÔNG mở được dữ liệu nghiệp vụ nào. */
 export type PreTokenClaims = {
   sub: string;
-  stage: 'SELECT_TENANT';
+  /** CHANGE_PASSWORD: đăng nhập bằng mật khẩu tạm, chỉ đổi được mật khẩu. */
+  stage: 'SELECT_TENANT' | 'CHANGE_PASSWORD';
+  /** Cách đã xác thực người: chỉ 'pwd' mới đổi được sang phiên nền tảng. */
+  amr: 'pwd' | 'otp';
   iat: number;
   exp: number;
 };

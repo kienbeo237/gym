@@ -56,6 +56,9 @@ export function assertCauHinhSanSang(env: NodeJS.ProcessEnv = process.env): void
     if (v && v.length < 32) loi.push(`${ten}: quá ngắn (${v.length} ký tự, cần ≥ 32)`);
   }
 
+  // Driver log của SMS ghi NGUYÊN mã OTP ra log — ở môi trường thật đó là lộ mã.
+  if (env.SMS_DRIVER === 'log') loi.push('SMS_DRIVER: "log" ghi mã OTP ra log, không dùng ở môi trường thật');
+
   if (loi.length > 0) {
     new Logger('config').error(
       `Từ chối khởi động — cấu hình chưa sẵn sàng cho môi trường thật:\n  ` +

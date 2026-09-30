@@ -1,6 +1,6 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { sql } from 'kysely';
-import type { ClosePayrollRequest, PayrollLine, PayrollResponse, PayrollStatus } from '@pt/contracts';
+import type { ClosePayrollRequest, PayrollLine, PayrollResponse, PayrollStatus, ReopenPayrollRequest } from '@pt/contracts';
 import { TenantDb, type Tx } from '../common/tenant-db.service';
 import { requireContext } from '../common/tenant-context';
 
@@ -203,6 +203,85 @@ export class PayrollService {
           entity: 'payroll_run',
           entity_id: run.id,
           after: JSON.stringify({ month: dto.month, trainers: tatCa.size }),
+        })
+        .execute();
+    });
+
+    return this.view(dto.month);
+  }
+
+  /**
+   * Mở lại bảng lương đã chốt nhầm. Xoá payroll_run -> payroll_line (CASCADE)
+   * -> commission_entry.payroll_line_id về NULL (ON DELETE SET NULL): mọi dòng
+   * hoa hồng quay lại "chưa trả" và lần chốt sau cuốn lại chúng. Không số nào
+   * bị sửa tay.
+   *
+   * Ba chặn:
+   *  - Đã CHI (PAID) thì không mở: tiền đã ra khỏi két, đảo ngược là việc kế
+   *    toán (điều chỉnh ở tháng sau), không phải bấm nút.
+   *  - Còn bảng lương THÁNG SAU đã chốt thì không mở: mở ngược từ tháng mới
+   *    nhất về, để không có hai tháng cùng "đang sửa" chồng lên nhau.
+   *  - Bắt buộc lý do; nhật ký giữ ảnh chụp đủ các dòng đã chốt.
+   */
+  async reopen(dto: ReopenPayrollRequest): Promise<PayrollResponse> {
+    const ctx = requireContext();
+
+    await this.tdb.run(async (tx) => {
+      // Cùng khoá với close(): không ai chốt lại trong lúc đang mở.
+      await sql`SELECT pg_advisory_xact_lock(hashtext(${ctx.tenantId} || ':payroll:' || ${dto.month}))`.execute(tx);
+
+      const run = await tx
+        .selectFrom('payroll_run')
+        .select(['id', 'status', 'closed_at', 'closed_by'])
+        .where('period_month', '=', dauThang(dto.month))
+        .forUpdate()
+        .executeTakeFirst();
+      if (!run) throw new NotFoundException('PAYROLL_NOT_FOUND');
+      if (run.status === 'PAID') {
+        throw new ConflictException({
+          code: 'PAYROLL_ALREADY_PAID',
+          message: 'Bảng lương này đã chi — không mở lại được. Sai sót thì điều chỉnh ở bảng lương tháng sau.',
+        });
+      }
+      if (run.status !== 'CLOSED') {
+        throw new BadRequestException({ code: 'PAYROLL_NOT_CLOSED', message: 'Bảng lương tháng này chưa chốt.' });
+      }
+      const sauDo = await tx
+        .selectFrom('payroll_run')
+        .select('period_month')
+        .where('period_month', '>', dauThang(dto.month))
+        .orderBy('period_month')
+        .executeTakeFirst();
+      if (sauDo) {
+        throw new ConflictException({
+          code: 'PAYROLL_LATER_CLOSED',
+          message: `Bảng lương tháng ${String(sauDo.period_month).slice(0, 7)} đã chốt sau tháng này — mở lại tháng đó trước.`,
+        });
+      }
+
+      const dong = await tx
+        .selectFrom('payroll_line')
+        .select(['trainer_id', 'base_salary', 'commission_sale', 'commission_teach', 'adjustment', 'adjustment_note', 'total', 'sessions_taught'])
+        .where('run_id', '=', run.id)
+        .execute();
+      const soHoaHong = await tx
+        .selectFrom('commission_entry')
+        .select((eb) => eb.fn.countAll<string>().as('n'))
+        .where('payroll_line_id', 'in', tx.selectFrom('payroll_line').select('id').where('run_id', '=', run.id))
+        .executeTakeFirstOrThrow();
+
+      await tx.deleteFrom('payroll_run').where('id', '=', run.id).execute();
+
+      await tx
+        .insertInto('audit_log')
+        .values({
+          tenant_id: ctx.tenantId,
+          actor_id: ctx.identityId,
+          action: 'PAYROLL_REOPENED',
+          entity: 'payroll_run',
+          entity_id: run.id,
+          before: JSON.stringify({ month: dto.month, closedAt: run.closed_at, closedBy: run.closed_by, lines: dong }),
+          after: JSON.stringify({ reason: dto.reason, releasedCommissions: Number(soHoaHong.n) }),
         })
         .execute();
     });

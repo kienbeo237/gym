@@ -2,6 +2,7 @@ import { Global, Module, Logger, type OnApplicationShutdown, Inject } from '@nes
 import { ConfigService } from '@nestjs/config';
 import Redis from 'ioredis';
 import { RateLimitService } from './rate-limit.service';
+import { EphemeralStore } from './ephemeral-store.service';
 import { REDIS } from './redis.tokens';
 
 @Global()
@@ -29,8 +30,9 @@ import { REDIS } from './redis.tokens';
       },
     },
     RateLimitService,
+    EphemeralStore,
   ],
-  exports: [REDIS, RateLimitService],
+  exports: [REDIS, RateLimitService, EphemeralStore],
 })
 export class RedisModule implements OnApplicationShutdown {
   constructor(@Inject(REDIS) private readonly redis: Redis) {}

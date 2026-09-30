@@ -42,16 +42,29 @@ const GLOBAL_TABLES = new Set([
   // nên mốc làm mới cũng chung — không có gì để chia theo tenant. Bảng chỉ chứa
   // một dòng (thời điểm + thời lượng), không có dữ liệu nghiệp vụ.
   'reporting_refresh_log',
+  // Bản sao sao kê của tài khoản nhận tiền NỀN TẢNG (0017). Không thuộc phòng
+  // nào: một dòng tiền vào có thể không khớp phòng nào cả. Phòng khớp được ghi ở
+  // `matched_tenant`; app_rw không có quyền gì trên bảng này.
+  'bank_txn_event',
+  // Kết quả chạy tám view đối soát (0018). Đối soát quét MỌI phòng cùng lúc —
+  // lệch dữ liệu là lỗi hệ thống, không phải của một phòng. Chỉ app_platform
+  // đọc/ghi; app_rw và app_auth bị REVOKE ALL.
+  'reconciliation_run',
 ]);
 
 /**
  * UNIQUE index không chứa tenant_id nhưng vẫn ĐÚNG, kèm lý do.
- * Ba dòng, không hơn — mỗi dòng phải tự giải thích được.
+ * Năm dòng, không hơn — mỗi dòng phải tự giải thích được.
  */
 const UNIQUE_INDEX_EXCEPTIONS = new Map([
   ['uq_file_key', 'object_key đã mang tiền tố t/<tenant_id>/, ép bởi CHECK file_key_tenant_prefix'],
   ['refresh_token_token_hash_key', 'sha256 của token ngẫu nhiên 256 bit — duy nhất toàn cục theo bản chất'],
   ['checkin_token_token_hash_key', 'sha256 của token ngẫu nhiên — duy nhất toàn cục theo bản chất'],
+  // Ngược với mọi dòng khác: ở đây duy nhất TOÀN NỀN TẢNG là yêu cầu nghiệp vụ.
+  // Một dòng sao kê ngân hàng phải trỏ về đúng một hoá đơn SaaS; kèm tenant_id
+  // thì hai phòng có thể có cùng nội dung chuyển khoản (0016).
+  ['uq_billing_transfer_ref', 'nội dung chuyển khoản đối soát sao kê — phải duy nhất trên toàn nền tảng'],
+  ['uq_bank_txn_provider', 'mã giao dịch của nhà cung cấp — webhook gửi lại không được tất toán hai lần (0017)'],
 ]);
 
 let admin: Client;   // pt_migrator: đọc catalog
@@ -232,6 +245,77 @@ describe('B. Đặc quyền: role của API không được bỏ qua RLS', () =>
       ).rejects.toThrow(/permission denied/i);
     }
   });
+
+  /**
+   * Hàm SECURITY DEFINER là CỬA XUYÊN RLS: chạy bằng quyền của chủ sở hữu.
+   * Mỗi cửa phải được duyệt riêng, kèm lý do nó không lộ dữ liệu.
+   *
+   * Bẫy cụ thể: Postgres mặc định cấp EXECUTE cho PUBLIC. Quên
+   * `REVOKE ALL ... FROM PUBLIC` là app_rw — và mọi role khác — gọi được cửa đó.
+   */
+  const CUA_XUYEN_RLS = new Map([
+    ['resolve_or_create_identity', 'trả về đúng một uuid, không lộ gì khác (0007)'],
+    ['refresh_reporting', 'không trả dòng nào (0012/0013)'],
+    ['outbox_claim_due', 'chỉ trả (id, tenant_id); nội dung đọc sau qua RLS (0015)'],
+    ['worker_tenant_ids', 'chỉ trả uuid của phòng đang hoạt động (0015)'],
+  ]);
+
+  it('mọi hàm SECURITY DEFINER mà app_rw gọi được đều nằm trong danh sách đã duyệt', async () => {
+    const { rows } = await admin.query<{ proname: string }>(
+      `SELECT p.proname
+         FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+        WHERE n.nspname = 'public' AND p.prosecdef
+          AND has_function_privilege('app_rw', p.oid, 'EXECUTE')`,
+    );
+    const la = rows.map((r) => r.proname).filter((t) => !CUA_XUYEN_RLS.has(t));
+    expect(
+      la,
+      `Hàm SECURITY DEFINER chưa duyệt mà app_rw gọi được — hoặc thêm vào\n` +
+        `CUA_XUYEN_RLS kèm lý do nó không lộ dữ liệu, hoặc REVOKE ... FROM PUBLIC:\n${la.join('\n')}`,
+    ).toEqual([]);
+    // Chống test rỗng: cả bốn cửa đã biết phải thật sự tồn tại.
+    expect(rows.length).toBeGreaterThanOrEqual(CUA_XUYEN_RLS.size);
+  });
+
+  it('outbox_claim_due chỉ trả mã định danh, không trả nội dung tin', async () => {
+    const { rows } = await admin.query<{ out: string }>(
+      `SELECT pg_get_function_result(p.oid) AS out
+         FROM pg_proc p WHERE p.proname = 'outbox_claim_due'`,
+    );
+    expect(rows[0]?.out).toBe('TABLE(id bigint, tenant_id uuid)');
+  });
+});
+
+describe('B2. app_auth: quyền theo CỘT trên dữ liệu gửi tin', () => {
+  let auth: Client;
+  beforeAll(async () => {
+    auth = new Client({ connectionString: process.env.DATABASE_URL_AUTH });
+    await auth.connect();
+  });
+  afterAll(async () => {
+    await auth.end().catch(() => {});
+  });
+
+  it('đọc được trạng thái OA — đủ để chọn phòng gửi OTP', async () => {
+    await expect(auth.query(`SELECT tenant_id, status FROM tenant_zalo_oa LIMIT 1`)).resolves.toBeDefined();
+  });
+
+  it('KHÔNG đọc được secret / token của OA nào', async () => {
+    // app_auth có BYPASSRLS: cấp theo bảng là đọc được secret của MỌI phòng.
+    for (const cot of ['secret_enc', 'access_token_enc', 'refresh_token_enc']) {
+      await expect(
+        auth.query(`SELECT ${cot} FROM tenant_zalo_oa LIMIT 1`),
+        `app_auth đọc được tenant_zalo_oa.${cot}`,
+      ).rejects.toThrow(/permission denied/i);
+    }
+  });
+
+  it('ghi được vào hộp thư đi nhưng KHÔNG đọc lại được', async () => {
+    await expect(
+      auth.query(`SELECT payload FROM notification_outbox LIMIT 1`),
+      'app_auth đọc được nội dung tin của mọi phòng',
+    ).rejects.toThrow(/permission denied/i);
+  });
 });
 
 // ============================================================================
@@ -339,7 +423,11 @@ describe('D. Hành vi: cách ly thật, bằng chính role của API', () => {
   it('mỗi phòng chỉ thấy dữ liệu của mình, trên CÙNG một kết nối', async () => {
     const a = await asTenant<{ n: string }>(tenantA, `SELECT count(*)::text AS n FROM member`);
     const b = await asTenant<{ n: string }>(tenantB, `SELECT count(*)::text AS n FROM member`);
-    const tong = await admin.query<{ n: string }>(`SELECT count(*)::text AS n FROM member`);
+    // Tổng của RIÊNG hai phòng này: CSDL dev có thể còn phòng khác (loadtest).
+    const tong = await admin.query<{ n: string }>(
+      `SELECT count(*)::text AS n FROM member WHERE tenant_id IN ($1, $2)`,
+      [tenantA, tenantB],
+    );
 
     expect(Number(a[0]!.n)).toBeGreaterThan(0);
     expect(Number(b[0]!.n)).toBeGreaterThan(0);

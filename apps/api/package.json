@@ -8,9 +8,14 @@
     "start": "node dist/main.js",
     "test": "vitest run",
     "test:watch": "vitest",
-    "lint": "eslint src --ext .ts"
+    "lint": "eslint src --ext .ts",
+    "dev:worker": "nest start --watch --entryFile worker --path tsconfig.worker-dev.json",
+    "start:worker": "node dist/worker.js"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.717.0",
+    "@aws-sdk/s3-request-presigner": "^3.717.0",
+    "@expo-google-fonts/be-vietnam-pro": "^0.4.1",
     "@nestjs/common": "^11.0.0",
     "@nestjs/config": "^4.0.0",
     "@nestjs/core": "^11.0.0",
@@ -21,18 +26,18 @@
     "helmet": "^8.0.0",
     "ioredis": "^5.4.2",
     "kysely": "^0.27.5",
+    "pdfkit": "^0.17",
     "pg": "^8.13.1",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.1",
-    "zod": "^3.24.1",
-    "@aws-sdk/client-s3": "^3.717.0",
-    "@aws-sdk/s3-request-presigner": "^3.717.0"
+    "zod": "^3.24.1"
   },
   "devDependencies": {
     "@nestjs/cli": "^11.0.0",
     "@types/bcryptjs": "^2.4.6",
     "@types/express": "^5.0.0",
     "@types/node": "^22.10.2",
+    "@types/pdfkit": "^0.17.6",
     "@types/pg": "^8.11.10",
     "typescript": "^5.7.2",
     "vitest": "^2.1.8"

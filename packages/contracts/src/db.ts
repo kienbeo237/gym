@@ -47,6 +47,26 @@ export interface AuditLog {
   tenant_id: string;
 }
 
+export interface BankTxnEvent {
+  account_no: string | null;
+  amount: Int8;
+  bank_ref: string | null;
+  content: Generated<string>;
+  direction: string;
+  id: Generated<Int8>;
+  invoice_id: string | null;
+  matched_tenant: string | null;
+  outcome: string;
+  payload: Json;
+  provider: string;
+  provider_txn_id: string;
+  received_at: Generated<Timestamp>;
+  resolve_note: string | null;
+  resolved_at: Timestamp | null;
+  resolved_by: string | null;
+  txn_at: Timestamp | null;
+}
+
 export interface Booking {
   cancel_reason: string | null;
   cancelled_at: Timestamp | null;
@@ -157,6 +177,7 @@ export interface Identity {
   full_name: string;
   id: Generated<string>;
   last_login_at: Timestamp | null;
+  must_change_password: Generated<boolean>;
   password_hash: string | null;
   phone: string;
   phone_verified_at: Timestamp | null;
@@ -269,6 +290,7 @@ export interface NotificationOutbox {
   attempts: Generated<number>;
   channel: string;
   created_at: Generated<Timestamp>;
+  delivered_at: Timestamp | null;
   id: Generated<Int8>;
   idempotency_key: string;
   last_error: string | null;
@@ -390,6 +412,20 @@ export interface Plan {
   sort_order: Generated<number>;
 }
 
+export interface PlanChangeRequest {
+  created_at: Generated<Timestamp>;
+  decided_at: Timestamp | null;
+  decided_by: string | null;
+  decision_note: string | null;
+  from_plan: string;
+  id: Generated<string>;
+  note: string | null;
+  requested_by: string;
+  status: Generated<string>;
+  tenant_id: string;
+  to_plan: string;
+}
+
 export interface PlatformAdmin {
   created_at: Generated<Timestamp>;
   identity_id: string;
@@ -404,6 +440,16 @@ export interface PlatformAuditLog {
   id: Generated<Int8>;
   ip: string | null;
   target_tenant: string | null;
+}
+
+export interface ReconciliationRun {
+  counts: Json;
+  duration_ms: Generated<number>;
+  errors: Generated<Json>;
+  id: Generated<Int8>;
+  ran_at: Generated<Timestamp>;
+  samples: Generated<Json>;
+  total: number;
 }
 
 export interface RefreshToken {
@@ -467,23 +513,30 @@ export interface Tenant {
   name: string;
   slug: string;
   status: Generated<string>;
+  status_note: string | null;
+  suspend_kind: string | null;
   timezone: Generated<string>;
   updated_at: Generated<Timestamp>;
 }
 
 export interface TenantBillingRecord {
   amount: Int8;
+  bank_event_id: Int8 | null;
+  bank_txn_ref: string | null;
   confirmed_at: Timestamp | null;
   confirmed_by: string | null;
   created_at: Generated<Timestamp>;
+  created_by: string | null;
+  due_date: DateString;
   id: Generated<string>;
   note: string | null;
+  paid_amount: Int8 | null;
   period_end: DateString;
   period_start: DateString;
   plan_code: string;
   status: Generated<string>;
   tenant_id: string;
-  transfer_ref: string | null;
+  transfer_ref: string;
 }
 
 export interface TenantMessageUsage {
@@ -494,6 +547,7 @@ export interface TenantMessageUsage {
 }
 
 export interface TenantPolicy {
+  auto_no_show: Generated<boolean>;
   booking_window_days: Generated<number>;
   checkin_grace_minutes: Generated<number>;
   late_cancel_deducts: Generated<boolean>;
@@ -504,8 +558,8 @@ export interface TenantPolicy {
 }
 
 export interface TenantSubscription {
-  current_period_end: DateString | null;
-  current_period_start: DateString | null;
+  current_period_end: DateString;
+  current_period_start: DateString;
   plan_code: string;
   status: Generated<string>;
   tenant_id: string;
@@ -526,13 +580,14 @@ export interface TenantZaloOa {
   app_id: string;
   connected_at: Timestamp | null;
   last_error: string | null;
-  oa_id: string;
+  oa_id: string | null;
   refresh_token_enc: Buffer | null;
   secret_enc: Buffer;
   status: Generated<string>;
   tenant_id: string;
   token_expires_at: Timestamp | null;
   updated_at: Generated<Timestamp>;
+  webhook_secret_enc: Buffer | null;
 }
 
 export interface TenantZnsTemplate {
@@ -681,6 +736,7 @@ export interface VTrainerMonth {
 
 export interface DB {
   audit_log: AuditLog;
+  bank_txn_event: BankTxnEvent;
   booking: Booking;
   campaign: Campaign;
   campaign_enrollment: CampaignEnrollment;
@@ -704,8 +760,10 @@ export interface DB {
   payroll_line: PayrollLine;
   payroll_run: PayrollRun;
   plan: Plan;
+  plan_change_request: PlanChangeRequest;
   platform_admin: PlatformAdmin;
   platform_audit_log: PlatformAuditLog;
+  reconciliation_run: ReconciliationRun;
   refresh_token: RefreshToken;
   reporting_refresh_log: ReportingRefreshLog;
   revenue_entry: RevenueEntry;

@@ -43,16 +43,33 @@ async function chuyenTiep(req: Request, path: string[]): Promise<NextResponse> {
     cache: 'no-store',
   });
 
-  const text = await res.text();
-  return new NextResponse(text, {
-    status: res.status,
-    headers: { 'content-type': res.headers.get('content-type') ?? 'application/json' },
-  });
+  // Đọc dạng BYTE, không phải chữ: `res.text()` giải mã UTF-8 và làm hỏng tệp
+  // nhị phân (hoá đơn PDF) — lỗi không báo gì, chỉ ra một tệp không mở được.
+  const body = await res.arrayBuffer();
+  // 204/205/304 không được mang body — kể cả chuỗi rỗng, Response sẽ ném lỗi.
+  if (res.status === 204 || res.status === 205 || res.status === 304) {
+    return new NextResponse(null, { status: res.status });
+  }
+  const headers: Record<string, string> = {
+    'content-type': res.headers.get('content-type') ?? 'application/json',
+  };
+  const disposition = res.headers.get('content-disposition');
+  if (disposition) headers['content-disposition'] = disposition;
+  return new NextResponse(body, { status: res.status, headers });
 }
 
 export async function GET(req: Request, ctx: { params: Promise<{ path: string[] }> }) {
   return chuyenTiep(req, (await ctx.params).path);
 }
 export async function POST(req: Request, ctx: { params: Promise<{ path: string[] }> }) {
+  return chuyenTiep(req, (await ctx.params).path);
+}
+export async function PUT(req: Request, ctx: { params: Promise<{ path: string[] }> }) {
+  return chuyenTiep(req, (await ctx.params).path);
+}
+export async function PATCH(req: Request, ctx: { params: Promise<{ path: string[] }> }) {
+  return chuyenTiep(req, (await ctx.params).path);
+}
+export async function DELETE(req: Request, ctx: { params: Promise<{ path: string[] }> }) {
   return chuyenTiep(req, (await ctx.params).path);
 }

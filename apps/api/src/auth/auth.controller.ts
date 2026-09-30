@@ -1,11 +1,13 @@
 import { Body, Controller, Headers, HttpCode, Post, Req, UsePipes } from '@nestjs/common';
 import {
+  ChangePasswordRequest,
   LoginRequest,
   OtpRequest,
   OtpVerifyRequest,
   SelectTenantRequest,
   type LoginResponse,
   type OtpRequestResponse,
+  type PlatformSessionResponse,
   type SessionResponse,
 } from '@pt/contracts';
 import { AuthService } from './auth.service';
@@ -50,7 +52,7 @@ export class AuthController {
     @Body(new ZodPipe(OtpVerifyRequest)) body: OtpVerifyRequest,
   ): Promise<LoginResponse> {
     const identityId = await this.otp.verify(body.phone, body.code);
-    return this.auth.completeAuthentication(identityId);
+    return this.auth.completeAuthentication(identityId, 'otp');
   }
 
   /** Bước 2: chọn phòng tập -> token mang tenantId, từ đây RLS mới có đầu vào. */
@@ -66,13 +68,44 @@ export class AuthController {
     return this.auth.selectTenant(preToken, body.tenantId, req.headers['user-agent']);
   }
 
+  /**
+   * Bước 2, nhánh quản trị nền tảng: preToken (chỉ từ đăng nhập MẬT KHẨU) -> phiên
+   * không mang tenant, chỉ mở được route @Platform().
+   */
+  @Public()
+  @Post('select-platform')
+  @HttpCode(200)
+  selectPlatform(
+    @Headers('authorization') authHeader: string | undefined,
+    @Req() req: { headers: Record<string, string | undefined> },
+  ): Promise<PlatformSessionResponse> {
+    const preToken = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : '';
+    return this.auth.selectPlatform(preToken, req.headers['user-agent']);
+  }
+
+  /**
+   * Đăng nhập bằng mật khẩu tạm -> đặt mật khẩu mới. preToken (stage
+   * CHANGE_PASSWORD) chỉ mở được đúng route này. Trả kết quả bước 1 như đăng
+   * nhập thường, người dùng đi tiếp bước chọn phòng.
+   */
+  @Public()
+  @Post('change-password')
+  @HttpCode(200)
+  changePassword(
+    @Headers('authorization') authHeader: string | undefined,
+    @Body(new ZodPipe(ChangePasswordRequest)) body: ChangePasswordRequest,
+  ): Promise<LoginResponse> {
+    const preToken = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : '';
+    return this.auth.changePassword(preToken, body.newPassword);
+  }
+
   @Public()
   @Post('refresh')
   @HttpCode(200)
   refresh(
     @Body() body: { refreshToken: string },
     @Req() req: { headers: Record<string, string | undefined> },
-  ): Promise<SessionResponse> {
+  ): Promise<SessionResponse | PlatformSessionResponse> {
     return this.auth.refresh(body.refreshToken, req.headers['user-agent']);
   }
 

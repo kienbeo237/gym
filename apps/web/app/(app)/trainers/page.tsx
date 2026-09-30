@@ -1,127 +1,125 @@
+import type { Metadata } from 'next';
+import Link from 'next/link';
+import { Dumbbell, HandCoins, TrendingUp, UserPlus, Users } from 'lucide-react';
 import type { Paged, TrainerSummary } from '@pt/contracts';
+import { Avatar, Badge, Card, EmptyState, PageHeader, StatCard, type Tone } from '../../../components/ui';
+import { TZ, vnd, vndGon } from '../../../lib/format';
 import { apiFetch, requireSession } from '../../../lib/session';
 
-const vnd = (n: number) => n.toLocaleString('vi-VN');
+export const metadata: Metadata = { title: 'Huấn luyện viên' };
+
+const TRANG_THAI: Record<string, { text: string; tone: Tone }> = {
+  ACTIVE: { text: 'Đang làm', tone: 'success' },
+  SUSPENDED: { text: 'Tạm nghỉ', tone: 'warning' },
+  LEFT: { text: 'Đã nghỉ', tone: 'neutral' },
+};
 
 export default async function TrainersPage() {
   const session = await requireSession();
   const data = await apiFetch<Paged<TrainerSummary>>('/trainers?size=50', session);
 
-  const thang = new Date().toLocaleDateString('vi-VN', {
-    month: 'long',
-    year: 'numeric',
-    timeZone: 'Asia/Ho_Chi_Minh',
-  });
+  const thang = new Date().toLocaleDateString('vi-VN', { month: 'long', year: 'numeric', timeZone: TZ });
 
   const tongDoanhThu = data.items.reduce((s, t) => s + t.revenueThisMonth, 0);
   const tongHoaHong = data.items.reduce((s, t) => s + t.commissionThisMonth, 0);
+  const tongBuoi = data.items.reduce((s, t) => s + t.sessionsThisMonth, 0);
+  const dangLam = data.items.filter((t) => t.status === 'ACTIVE').length;
+  // Hồ sơ đầy đủ (lương, hoa hồng) chỉ chủ phòng / quản lý xem — khớp @Roles của GET /trainers/:id.
+  const laQuanLy = session.roles.some((r) => r === 'OWNER' || r === 'ADMIN');
 
   return (
-    <main>
-      <header style={S.header}>
-        <div>
-          <h1 style={S.h1}>Huấn luyện viên</h1>
-          <p style={S.sub}>
-            {data.total} người · số liệu {thang}
-          </p>
-        </div>
-        <div style={S.tiles}>
-          <div style={S.tile}>
-            <span style={S.tileLabel}>Doanh thu ghi nhận</span>
-            <strong style={S.tileValue}>{vnd(tongDoanhThu)} ₫</strong>
-            {/* Nói rõ mốc ghi nhận ngay trên màn hình: đây là con số theo BUỔI
-                ĐÃ TẬP, không phải tiền đã thu. Hai số này khác nhau và người
-                dùng sẽ hỏi. */}
-            <span style={S.tileHint}>theo buổi đã tập</span>
-          </div>
-          <div style={S.tile}>
-            <span style={S.tileLabel}>Hoa hồng phải trả</span>
-            <strong style={S.tileValue}>{vnd(tongHoaHong)} ₫</strong>
-            <span style={S.tileHint}>bán + dạy</span>
-          </div>
-        </div>
-      </header>
+    <>
+      <PageHeader
+        title="Huấn luyện viên"
+        sub={`${data.total} người · số liệu ${thang}`}
+        actions={
+          laQuanLy ? (
+            <Link href="/trainers/new" className="btn btn-primary">
+              <UserPlus size={16} /> Thêm HLV
+            </Link>
+          ) : undefined
+        }
+      />
 
-      <table style={S.table}>
-        <thead>
-          <tr>
-            <th style={S.th}>Mã</th>
-            <th style={S.th}>Họ tên</th>
-            <th style={S.th}>Bậc</th>
-            <th style={{ ...S.th, textAlign: 'right' }}>Hội viên</th>
-            <th style={{ ...S.th, textAlign: 'right' }}>Buổi đã dạy</th>
-            <th style={{ ...S.th, textAlign: 'right' }}>Doanh thu</th>
-            <th style={{ ...S.th, textAlign: 'right' }}>Hoa hồng</th>
-            <th style={S.th}>Trạng thái</th>
-          </tr>
-        </thead>
-        <tbody>
-          {data.items.map((t) => (
-            <tr key={t.id}>
-              <td style={S.td}>{t.code}</td>
-              <td style={{ ...S.td, fontWeight: 600 }}>
-                {t.fullName}
-                <div style={S.phone}>{t.phone}</div>
-              </td>
-              <td style={S.td}>{t.level ?? '—'}</td>
-              <td style={{ ...S.td, textAlign: 'right' }}>{t.activeMembers}</td>
-              <td style={{ ...S.td, textAlign: 'right' }}>{t.sessionsThisMonth}</td>
-              <td style={{ ...S.td, textAlign: 'right' }}>{vnd(t.revenueThisMonth)}</td>
-              <td style={{ ...S.td, textAlign: 'right', color: '#93c5fd' }}>
-                {vnd(t.commissionThisMonth)}
-              </td>
-              <td style={S.td}>
-                <span style={t.status === 'ACTIVE' ? S.badgeOk : S.badgeOff}>
-                  {t.status === 'ACTIVE' ? 'Đang làm' : t.status === 'SUSPENDED' ? 'Tạm nghỉ' : 'Đã nghỉ'}
-                </span>
-              </td>
-            </tr>
-          ))}
-          {data.items.length === 0 && (
-            <tr>
-              <td style={{ ...S.td, color: '#8b93a7' }} colSpan={8}>
-                Chưa có huấn luyện viên nào.
-              </td>
-            </tr>
-          )}
-        </tbody>
-      </table>
-    </main>
+      <div className="stats">
+        <StatCard
+          label="Doanh thu ghi nhận"
+          value={vndGon(tongDoanhThu)}
+          unit="₫"
+          icon={TrendingUp}
+          // Nói rõ mốc ghi nhận ngay trên màn hình: đây là con số theo BUỔI ĐÃ
+          // TẬP, không phải tiền đã thu. Hai số này khác nhau và người dùng sẽ hỏi.
+          meta="theo buổi đã tập, không phải tiền đã thu"
+        />
+        <StatCard
+          label="Hoa hồng phải trả"
+          value={vndGon(tongHoaHong)}
+          unit="₫"
+          icon={HandCoins}
+          tone="info"
+          meta="gồm hoa hồng bán + dạy"
+        />
+        <StatCard label="Buổi đã dạy" value={tongBuoi} icon={Dumbbell} tone="success" meta={`trong ${thang}`} />
+        <StatCard label="Đang làm việc" value={dangLam} unit={`/ ${data.items.length}`} icon={Users} />
+      </div>
+
+      <Card flush title="Danh sách huấn luyện viên" desc={`Hiệu suất ${thang}`}>
+        {data.items.length === 0 ? (
+          <EmptyState icon={Dumbbell} title="Chưa có huấn luyện viên nào" />
+        ) : (
+          <div className="table-wrap">
+            <table className="table table-flush">
+              <thead>
+                <tr>
+                  <th>Huấn luyện viên</th>
+                  <th>Bậc</th>
+                  <th className="num">Hội viên</th>
+                  <th className="num">Buổi đã dạy</th>
+                  <th className="num">Doanh thu (₫)</th>
+                  <th className="num">Hoa hồng (₫)</th>
+                  <th>Trạng thái</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.items.map((t) => {
+                  const tt = TRANG_THAI[t.status] ?? { text: t.status, tone: 'neutral' as const };
+                  return (
+                    <tr key={t.id}>
+                      <td>
+                        <div className="cell-person">
+                          <Avatar name={t.fullName} />
+                          <div>
+                            {laQuanLy ? (
+                              <Link href={`/trainers/${t.id}`} className="cell-main link">
+                                {t.fullName}
+                              </Link>
+                            ) : (
+                              <div className="cell-main">{t.fullName}</div>
+                            )}
+                            <div className="cell-sub">
+                              {t.code} · {t.phone}
+                            </div>
+                          </div>
+                        </div>
+                      </td>
+                      <td>{t.level ? <Badge tone="primary">{t.level}</Badge> : <span className="faint">—</span>}</td>
+                      <td className="num">{t.activeMembers}</td>
+                      <td className="num">{t.sessionsThisMonth}</td>
+                      <td className="num">{vnd(t.revenueThisMonth)}</td>
+                      <td className="num strong text-primary">{vnd(t.commissionThisMonth)}</td>
+                      <td>
+                        <Badge tone={tt.tone} dot>
+                          {tt.text}
+                        </Badge>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Card>
+    </>
   );
 }
-
-const S: Record<string, React.CSSProperties> = {
-  header: {
-    display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end',
-    gap: 16, marginBottom: 20, flexWrap: 'wrap',
-  },
-  h1: { margin: 0, fontSize: 24 },
-  sub: { margin: '4px 0 0', fontSize: 13, color: '#8b93a7' },
-  tiles: { display: 'flex', gap: 12 },
-  tile: {
-    display: 'flex', flexDirection: 'column', gap: 2, padding: '10px 16px',
-    background: '#171a21', border: '1px solid #262b36', borderRadius: 10, minWidth: 160,
-  },
-  tileLabel: { fontSize: 11, color: '#8b93a7', textTransform: 'uppercase', letterSpacing: 0.4 },
-  tileValue: { fontSize: 18 },
-  tileHint: { fontSize: 11, color: '#6b7488' },
-  table: {
-    width: '100%', borderCollapse: 'collapse', background: '#171a21',
-    border: '1px solid #262b36', borderRadius: 12, overflow: 'hidden', fontSize: 14,
-  },
-  th: {
-    textAlign: 'left', padding: '11px 14px', fontSize: 12, fontWeight: 600,
-    color: '#8b93a7', borderBottom: '1px solid #262b36', textTransform: 'uppercase',
-    letterSpacing: 0.4,
-  },
-  td: { padding: '11px 14px', borderBottom: '1px solid #20242e', verticalAlign: 'top' },
-  phone: { fontSize: 12, color: '#8b93a7', fontWeight: 400, marginTop: 2 },
-  badgeOk: {
-    fontSize: 12, padding: '2px 8px', borderRadius: 999,
-    background: '#14301f', color: '#4ade80', border: '1px solid #1e5334',
-  },
-  badgeOff: {
-    fontSize: 12, padding: '2px 8px', borderRadius: 999,
-    background: '#2a2028', color: '#d1a3b0', border: '1px solid #45303a',
-  },
-};

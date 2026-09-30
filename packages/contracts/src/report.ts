@@ -137,3 +137,10 @@ export const ClosePayrollRequest = z.object({
     .default([]),
 });
 export type ClosePayrollRequest = z.infer<typeof ClosePayrollRequest>;
+
+/** Mở lại bảng lương đã chốt (chưa chi). Lý do bắt buộc — vào nhật ký cùng ảnh chụp các con số cũ. */
+export const ReopenPayrollRequest = z.object({
+  month: PeriodMonth,
+  reason: z.string().trim().min(10, 'Ghi rõ lý do (ít nhất 10 ký tự)').max(500),
+});
+export type ReopenPayrollRequest = z.infer<typeof ReopenPayrollRequest>;

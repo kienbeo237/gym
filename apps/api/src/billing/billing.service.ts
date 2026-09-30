@@ -237,24 +237,42 @@ export class BillingService {
       }
 
       const paidAt = dto.paidAt ? new Date(dto.paidAt) : new Date();
-      const pay = await this.insertPayment(tx, {
-        invoiceId,
-        scheduleId: dto.scheduleId ?? null,
-        kind: 'PAYMENT',
-        amount: dto.amount,
-        method: dto.method,
-        reference: dto.reference ?? null,
-        note: dto.note ?? null,
-        paidAt,
-        idempotencyKey: dto.idempotencyKey ?? null,
-      });
+      const phan = dto.scheduleId
+        ? [{ scheduleId: dto.scheduleId, seq: null, amount: dto.amount }]
+        : await this.phanBo(tx, invoiceId, dto.amount);
 
-      const commission = await this.commission.accrueForPayment(tx, {
-        paymentId: pay.id,
-        invoiceId,
-        signedAmount: dto.amount,
-        paidAt,
-      });
+      // Mỗi phần một dòng payment — đợt nào thu bao nhiêu phải đọc lại được từ
+      // sổ, và trigger sync_invoice_paid chốt trạng thái từng đợt theo dòng.
+      // Hoa hồng tính theo TỪNG dòng: v_sale_commission_drift đòi mỗi lần thu
+      // đúng một dòng hoa hồng.
+      let paymentId = '';
+      const hoaHong = new Map<string, PaymentResult['commission'][number]>();
+      for (const [i, p] of phan.entries()) {
+        const pay = await this.insertPayment(tx, {
+          invoiceId,
+          scheduleId: p.scheduleId,
+          kind: 'PAYMENT',
+          amount: p.amount,
+          method: dto.method,
+          reference: dto.reference ?? null,
+          note: dto.note ?? null,
+          paidAt,
+          // Phần đầu mang đúng khoá client gửi: bấm lại thì va ngay dòng đầu và
+          // cả transaction rollback, không phần nào bị ghi hai lần.
+          idempotencyKey: dto.idempotencyKey ? (i === 0 ? dto.idempotencyKey : `${dto.idempotencyKey}#${i + 1}`) : null,
+        });
+        if (i === 0) paymentId = pay.id;
+        for (const c of await this.commission.accrueForPayment(tx, {
+          paymentId: pay.id,
+          invoiceId,
+          signedAmount: p.amount,
+          paidAt,
+        })) {
+          const cu = hoaHong.get(c.trainerId);
+          hoaHong.set(c.trainerId, cu ? { ...cu, amount: cu.amount + c.amount } : c);
+        }
+      }
+      const commission = [...hoaHong.values()];
 
       // Đọc LẠI sau khi trigger sync_invoice_paid đã chạy — không tự tính lại
       // ở đây, vì hai công thức song song là hai công thức sẽ lệch.
@@ -265,16 +283,18 @@ export class BillingService {
         .executeTakeFirstOrThrow();
 
       await this.audit(tx, 'PAYMENT_RECORDED', invoiceId, {
-        paymentId: pay.id,
+        paymentId,
         amount: dto.amount,
         method: dto.method,
+        ...(phan.length > 1 || (!dto.scheduleId && phan[0]?.scheduleId) ? { allocations: phan } : {}),
       });
 
       return {
-        paymentId: pay.id,
+        paymentId,
         invoiceStatus: sau.status as InvoiceStatus,
         paidAmount: Number(sau.paid_amount),
         outstanding: Number(sau.total_amount) - Number(sau.paid_amount),
+        allocations: phan,
         commission,
       };
     });
@@ -415,6 +435,53 @@ export class BillingService {
    * Không có nó thì hai người thu cùng lúc đều đọc `paid_amount` cũ, đều thấy
    * "còn nợ", và cả hai cùng ghi — thu vượt mà không cờ nào chặn.
    */
+  /**
+   * Chia một khoản thu vào các đợt trả góp: đợt đến hạn SỚM NHẤT còn thiếu
+   * trước (chốt nghiệp vụ: nợ cũ trả trước). Đợt WAIVED bỏ qua. Còn thừa sau
+   * đợt cuối (thu vượt có chủ đích) thì thành phần thu tự do.
+   *
+   * "Còn thiếu" tính từ sổ payment theo schedule_id — cùng công thức với
+   * trigger sync_invoice_paid, không đọc cột status (status là hệ quả).
+   */
+  private async phanBo(
+    tx: Tx,
+    invoiceId: string,
+    soTien: number,
+  ): Promise<{ scheduleId: string | null; seq: number | null; amount: number }[]> {
+    const dot = await tx
+      .selectFrom('payment_schedule as ps')
+      .innerJoin('invoice as i', 'i.id', 'ps.invoice_id')
+      .select((eb) => [
+        'ps.id',
+        'ps.seq',
+        'ps.amount',
+        eb
+          .selectFrom('payment as p')
+          .select((e) => e.fn.coalesce(e.fn.sum<string>('p.signed_amount'), e.val('0')).as('s'))
+          .whereRef('p.schedule_id', '=', 'ps.id')
+          .as('daThu'),
+      ])
+      .where('ps.invoice_id', '=', invoiceId)
+      .where('i.is_installment', '=', true)
+      .where('ps.status', '<>', 'WAIVED')
+      .orderBy('ps.due_date')
+      .orderBy('ps.seq')
+      .execute();
+
+    const phan: { scheduleId: string | null; seq: number | null; amount: number }[] = [];
+    let con = soTien;
+    for (const d of dot) {
+      if (con <= 0) break;
+      const thieu = Number(d.amount) - Number(d.daThu ?? 0);
+      if (thieu <= 0) continue;
+      const lay = Math.min(thieu, con);
+      phan.push({ scheduleId: d.id, seq: d.seq, amount: lay });
+      con -= lay;
+    }
+    if (con > 0) phan.push({ scheduleId: null, seq: null, amount: con });
+    return phan;
+  }
+
   private async locked(tx: Tx, invoiceId: string) {
     const r = await sql<{
       id: string; status: string; paid_amount: string; total_amount: string;

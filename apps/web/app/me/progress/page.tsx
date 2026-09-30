@@ -1,7 +1,10 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { ChartLine, CircleAlert, Eye, LoaderCircle, Lock, Plus, TrendingDown, TrendingUp } from 'lucide-react';
 import type { ProgressEntry } from '@pt/contracts';
+import { EmptyState } from '../../../components/ui';
+import { ngayISO } from '../../../lib/format';
 
 const homNayVN = () => new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Ho_Chi_Minh' });
 
@@ -18,14 +21,17 @@ const homNayVN = () => new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/
 export default function MeProgress() {
   const [rows, setRows] = useState<ProgressEntry[] | null>(null);
   const [anh, setAnh] = useState<Record<string, string>>({});
+  const [dangXem, setDangXem] = useState<string | null>(null);
   const [form, setForm] = useState({ recordedOn: homNayVN(), weightKg: '', bodyFatPct: '', note: '' });
   const [tep, setTep] = useState<File | null>(null);
+  const [inputKey, setInputKey] = useState(0);
   const [busy, setBusy] = useState(false);
   const [loi, setLoi] = useState('');
 
   async function nap() {
     const res = await fetch('/api/proxy/me/progress');
     if (res.ok) setRows((await res.json()) as ProgressEntry[]);
+    else setRows([]);
   }
   useEffect(() => {
     void nap();
@@ -33,10 +39,15 @@ export default function MeProgress() {
 
   /** Lấy URL xem ảnh, hạn rất ngắn nên xin ngay lúc cần chứ không xin trước. */
   async function xemAnh(fileId: string) {
-    const res = await fetch(`/api/proxy/files/${fileId}/url`);
-    if (!res.ok) return;
-    const { url } = (await res.json()) as { url: string };
-    setAnh((a) => ({ ...a, [fileId]: url }));
+    setDangXem(fileId);
+    try {
+      const res = await fetch(`/api/proxy/files/${fileId}/url`);
+      if (!res.ok) return;
+      const { url } = (await res.json()) as { url: string };
+      setAnh((a) => ({ ...a, [fileId]: url }));
+    } finally {
+      setDangXem(null);
+    }
   }
 
   async function luu(e: React.FormEvent) {
@@ -79,8 +90,8 @@ export default function MeProgress() {
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
           recordedOn: form.recordedOn,
-          ...(form.weightKg ? { weightKg: Number(form.weightKg) } : {}),
-          ...(form.bodyFatPct ? { bodyFatPct: Number(form.bodyFatPct) } : {}),
+          ...(form.weightKg ? { weightKg: Number(form.weightKg.replace(',', '.')) } : {}),
+          ...(form.bodyFatPct ? { bodyFatPct: Number(form.bodyFatPct.replace(',', '.')) } : {}),
           ...(form.note ? { note: form.note } : {}),
           ...(photoFileId ? { photoFileId } : {}),
         }),
@@ -90,6 +101,7 @@ export default function MeProgress() {
 
       setForm({ recordedOn: homNayVN(), weightKg: '', bodyFatPct: '', note: '' });
       setTep(null);
+      setInputKey((k) => k + 1);
       await nap();
     } catch (err) {
       setLoi(err instanceof Error ? err.message : 'Đã có lỗi xảy ra');
@@ -100,121 +112,145 @@ export default function MeProgress() {
 
   return (
     <>
-      <h1 style={S.h1}>Tiến độ của bạn</h1>
-      <p style={S.sub}>Số đo và ảnh chỉ mình bạn và phòng tập xem được.</p>
+      <h1 className="m-title">Tiến độ của bạn</h1>
+      <p className="m-sub row-start" style={{ gap: 6 }}>
+        <Lock size={13} /> Số đo và ảnh chỉ mình bạn và phòng tập xem được.
+      </p>
 
-      <form style={S.form} onSubmit={luu}>
-        <div style={S.doi}>
-          <label style={S.label}>
-            Ngày đo
+      <form className="card list-card mt-16" style={{ gap: 14 }} onSubmit={luu}>
+        <div className="card-title">Ghi số đo mới</div>
+        <div className="form-grid">
+          <label className="field">
+            <span className="field-label">Ngày đo</span>
             <input
-              style={S.input} type="date" value={form.recordedOn}
+              className="input"
+              type="date"
+              value={form.recordedOn}
+              max={homNayVN()}
               onChange={(e) => setForm({ ...form, recordedOn: e.target.value })}
             />
           </label>
-          <label style={S.label}>
-            Cân nặng (kg)
+          <label className="field">
+            <span className="field-label">Cân nặng (kg)</span>
             <input
-              style={S.input} inputMode="decimal" placeholder="72.5" value={form.weightKg}
+              className="input"
+              inputMode="decimal"
+              placeholder="72.5"
+              value={form.weightKg}
               onChange={(e) => setForm({ ...form, weightKg: e.target.value })}
             />
           </label>
-        </div>
-        <div style={S.doi}>
-          <label style={S.label}>
-            Tỷ lệ mỡ (%)
+          <label className="field">
+            <span className="field-label">Tỷ lệ mỡ (%)</span>
             <input
-              style={S.input} inputMode="decimal" placeholder="18.3" value={form.bodyFatPct}
+              className="input"
+              inputMode="decimal"
+              placeholder="18.3"
+              value={form.bodyFatPct}
               onChange={(e) => setForm({ ...form, bodyFatPct: e.target.value })}
             />
           </label>
-          <label style={S.label}>
-            Ảnh (tuỳ chọn)
+          <label className="field">
+            <span className="field-label">Ảnh (tuỳ chọn)</span>
             <input
-              style={S.input} type="file" accept="image/jpeg,image/png,image/webp"
+              key={inputKey}
+              className="input"
+              type="file"
+              accept="image/jpeg,image/png,image/webp"
               onChange={(e) => setTep(e.target.files?.[0] ?? null)}
             />
           </label>
         </div>
-        <label style={S.label}>
-          Ghi chú
+        <label className="field">
+          <span className="field-label">Ghi chú</span>
           <input
-            style={S.input} value={form.note} placeholder="Cảm nhận, chế độ ăn…"
+            className="input"
+            value={form.note}
+            placeholder="Cảm nhận, chế độ ăn…"
             onChange={(e) => setForm({ ...form, note: e.target.value })}
           />
         </label>
-        {loi && <p style={S.loi}>{loi}</p>}
-        <button style={S.nut} disabled={busy} type="submit">
+        {loi && (
+          <div className="alert" data-tone="danger" role="alert">
+            <CircleAlert size={17} />
+            <div className="alert-body">{loi}</div>
+          </div>
+        )}
+        <button className="btn btn-primary btn-lg btn-block" disabled={busy} type="submit">
+          {busy ? <LoaderCircle size={18} className="spin" /> : <Plus size={18} />}
           {busy ? 'Đang lưu…' : 'Lưu số đo'}
         </button>
       </form>
 
-      {rows === null && <p style={S.trong}>Đang tải…</p>}
-      {rows?.length === 0 && <p style={S.trong}>Chưa có số đo nào.</p>}
+      <h2 className="m-section">Nhật ký</h2>
 
-      {rows?.map((r) => (
-        <article key={r.id} style={S.card}>
-          <div style={S.hang}>
-            <strong>{r.recordedOn}</strong>
-            {r.weightDelta != null && (
-              <span style={r.weightDelta <= 0 ? S.giam : S.tang}>
-                {r.weightDelta > 0 ? '+' : ''}
-                {r.weightDelta} kg
-              </span>
-            )}
-          </div>
-          <div style={S.soDo}>
-            {r.weightKg != null && <span>{r.weightKg} kg</span>}
-            {r.bodyFatPct != null && <span>mỡ {r.bodyFatPct}%</span>}
-            {r.muscleKg != null && <span>cơ {r.muscleKg} kg</span>}
-          </div>
-          {r.note && <span style={S.ghiChu}>{r.note}</span>}
-          {r.photoFileId &&
-            (anh[r.photoFileId] ? (
-              <img src={anh[r.photoFileId]} alt="Ảnh tiến độ" style={S.anh} />
-            ) : (
-              <button style={S.nutAnh} onClick={() => void xemAnh(r.photoFileId!)}>
-                Xem ảnh
-              </button>
-            ))}
-        </article>
-      ))}
+      {rows === null && (
+        <div className="stack">
+          {[0, 1, 2].map((i) => (
+            <div key={i} className="skeleton" style={{ height: 84, borderRadius: 14 }} />
+          ))}
+        </div>
+      )}
+      {rows?.length === 0 && (
+        <div className="card">
+          <EmptyState icon={ChartLine} title="Chưa có số đo nào" text="Ghi lần đo đầu tiên để theo dõi tiến bộ theo thời gian." />
+        </div>
+      )}
+
+      <div className="stack">
+        {rows?.map((r) => (
+          <article key={r.id} className="card list-card">
+            <div className="row">
+              <strong>{ngayISO(r.recordedOn)}</strong>
+              {r.weightDelta != null && r.weightDelta !== 0 && (
+                <span
+                  className="badge"
+                  data-tone={r.weightDelta < 0 ? 'success' : 'warning'}
+                >
+                  {r.weightDelta < 0 ? <TrendingDown size={13} /> : <TrendingUp size={13} />}
+                  {r.weightDelta > 0 ? '+' : ''}
+                  {r.weightDelta} kg
+                </span>
+              )}
+            </div>
+            <div className="row-start" style={{ gap: 20, flexWrap: 'wrap' }}>
+              {r.weightKg != null && <Chi so={r.weightKg} donVi="kg" nhan="Cân nặng" />}
+              {r.bodyFatPct != null && <Chi so={r.bodyFatPct} donVi="%" nhan="Tỷ lệ mỡ" />}
+              {r.muscleKg != null && <Chi so={r.muscleKg} donVi="kg" nhan="Khối cơ" />}
+            </div>
+            {r.note && <p className="small muted">{r.note}</p>}
+            {r.photoFileId &&
+              (anh[r.photoFileId] ? (
+                <img src={anh[r.photoFileId]} alt="Ảnh tiến độ" style={{ width: '100%', borderRadius: 10 }} />
+              ) : (
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  style={{ alignSelf: 'flex-start' }}
+                  disabled={dangXem === r.photoFileId}
+                  onClick={() => void xemAnh(r.photoFileId!)}
+                >
+                  {dangXem === r.photoFileId ? <LoaderCircle size={15} className="spin" /> : <Eye size={15} />}
+                  Xem ảnh
+                </button>
+              ))}
+          </article>
+        ))}
+      </div>
     </>
   );
 }
 
-const S: Record<string, React.CSSProperties> = {
-  h1: { margin: 0, fontSize: 22 },
-  sub: { margin: '3px 0 16px', fontSize: 13, color: '#8b93a7' },
-  trong: { fontSize: 13, color: '#8b93a7' },
-  form: {
-    background: '#171a21', border: '1px solid #262b36', borderRadius: 12,
-    padding: 16, marginBottom: 18, display: 'flex', flexDirection: 'column', gap: 10,
-  },
-  doi: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 },
-  label: { display: 'flex', flexDirection: 'column', gap: 5, fontSize: 12, color: '#b6bdcd' },
-  input: {
-    padding: '9px 11px', borderRadius: 8, border: '1px solid #2c3240',
-    background: '#0f1115', color: '#f2f4f8', fontSize: 14, minWidth: 0,
-  },
-  nut: {
-    padding: '11px 14px', borderRadius: 8, border: 'none', background: '#3b82f6',
-    color: '#fff', fontSize: 14, fontWeight: 600, cursor: 'pointer',
-  },
-  nutAnh: {
-    alignSelf: 'flex-start', padding: '6px 12px', borderRadius: 7,
-    border: '1px solid #2c3240', background: '#0f1115', color: '#93c5fd',
-    fontSize: 12, cursor: 'pointer',
-  },
-  anh: { width: '100%', borderRadius: 8, marginTop: 4 },
-  card: {
-    background: '#171a21', border: '1px solid #262b36', borderRadius: 10,
-    padding: '12px 14px', marginBottom: 8, display: 'flex', flexDirection: 'column', gap: 5,
-  },
-  hang: { display: 'flex', justifyContent: 'space-between', fontSize: 14 },
-  soDo: { display: 'flex', gap: 12, fontSize: 13, color: '#b6bdcd' },
-  ghiChu: { fontSize: 12, color: '#8b93a7' },
-  giam: { fontSize: 13, color: '#4ade80' },
-  tang: { fontSize: 13, color: '#fbbf24' },
-  loi: { margin: 0, fontSize: 13, color: '#f87171' },
-};
+function Chi({ so, donVi, nhan }: { so: number; donVi: string; nhan: string }) {
+  return (
+    <div>
+      <div className="cell-sub">{nhan}</div>
+      <div style={{ fontSize: 18, fontWeight: 700 }} className="num">
+        {so}
+        <span className="muted" style={{ fontSize: 13, fontWeight: 600, marginLeft: 3 }}>
+          {donVi}
+        </span>
+      </div>
+    </div>
+  );
+}

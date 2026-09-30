@@ -6,6 +6,7 @@ import { DatabaseModule } from './db/database.module';
 import { RedisModule } from './redis/redis.module';
 import { CommonModule } from './common/common.module';
 import { JwtAuthGuard, TenantContextInterceptor } from './common/auth.guard';
+import { TenantStatusGuard } from './common/tenant-status.guard';
 import { AuthModule } from './auth/auth.module';
 import { MemberModule } from './member/member.module';
 import { TrainerModule } from './trainer/trainer.module';
@@ -17,7 +18,11 @@ import { BillingModule } from './billing/billing.module';
 import { AttendanceModule } from './attendance/attendance.module';
 import { ReportModule } from './report/report.module';
 import { MeModule } from './me/me.module';
+import { NotificationModule } from './notification/notification.module';
 import { HealthModule } from './health/health.module';
+import { SubscriptionModule } from './subscription/subscription.module';
+import { PlatformModule } from './platform/platform.module';
+import { WebhookModule } from './webhook/webhook.module';
 
 @Module({
   imports: [
@@ -38,13 +43,19 @@ import { HealthModule } from './health/health.module';
     AttendanceModule,
     ReportModule,
     MeModule,
+    NotificationModule,
     HealthModule,
+    SubscriptionModule,
+    PlatformModule,
+    WebhookModule,
   ],
   providers: [
     // Mặc định là ĐÓNG: mọi route đều cần token, mở ra bằng @Public().
     // Ngược lại (mặc định mở, đóng bằng decorator) thì mỗi route mới quên gắn
     // decorator là một lỗ hổng, và không gì nhắc.
     { provide: APP_GUARD, useClass: JwtAuthGuard },
+    // SAU JwtAuthGuard: cần req.user. Phòng tạm khoá = chỉ đọc, phòng đóng = không gì.
+    { provide: APP_GUARD, useClass: TenantStatusGuard },
     { provide: APP_INTERCEPTOR, useClass: TenantContextInterceptor },
   ],
 })

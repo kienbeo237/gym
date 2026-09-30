@@ -14,6 +14,9 @@ import type {
   DB,
   LoginRequest,
   LoginResponse,
+  PlatformLevel,
+  PlatformSessionResponse,
+  PlatformTokenClaims,
   SessionResponse,
   TenantOption,
   TenantRole,
@@ -25,6 +28,19 @@ import { RateLimitService } from '../redis/rate-limit.service';
 import { globalKey, phoneKeyPart } from '../redis/redis-keys';
 
 const sha256 = (v: string): string => createHash('sha256').update(v).digest('hex');
+
+/**
+ * Dùng lại refresh token VỪA xoay (trong vòng này) không bị coi là bị đánh cắp.
+ *
+ * Trình duyệt mở một trang là vài request song song (trang + prefetch + gọi
+ * API từ client). Access token hết hạn thì CẢ vài request cùng cầm một refresh
+ * token đi làm mới: request đầu xoay, các request sau thấy token "đã thu hồi".
+ * Coi đó là trộm thì người dùng bị đăng xuất khỏi mọi thiết bị mỗi 15 phút.
+ *
+ * Đổi lại: kẻ trộm dùng token trong đúng 30 giây sau lượt xoay hợp lệ thì cũng
+ * lọt. Sau 30 giây, dùng lại vẫn thu hồi cả họ token như cũ.
+ */
+const REUSE_GRACE_MS = 30_000;
 
 /**
  * Xác thực chạy TRƯỚC khi có ngữ cảnh tenant, nên nó là nơi DUY NHẤT dùng
@@ -63,7 +79,7 @@ export class AuthService {
 
     const identity = await this.db
       .selectFrom('identity')
-      .select(['id', 'full_name', 'password_hash', 'status'])
+      .select(['id', 'full_name', 'password_hash', 'status', 'must_change_password'])
       .where('phone', '=', req.phone)
       .executeTakeFirst();
 
@@ -81,7 +97,57 @@ export class AuthService {
       .where('id', '=', identity.id)
       .execute();
 
-    return this.completeAuthentication(identity.id);
+    if (identity.must_change_password) {
+      // Mật khẩu tạm: chưa cho chọn phòng, chưa cho vào nền tảng. preToken ở
+      // đây chỉ mở được đúng một cửa — đổi mật khẩu.
+      const preToken = await this.jwt.signAsync(
+        { sub: identity.id, stage: 'CHANGE_PASSWORD', amr: 'pwd' } satisfies Omit<PreTokenClaims, 'iat' | 'exp'>,
+        { secret: this.cfg.getOrThrow('JWT_ACCESS_SECRET'), expiresIn: '10m' },
+      );
+      return {
+        preToken,
+        identityId: identity.id,
+        fullName: identity.full_name,
+        tenants: [],
+        platform: null,
+        mustChangePassword: true,
+      };
+    }
+
+    return this.completeAuthentication(identity.id, 'pwd');
+  }
+
+  /**
+   * Đặt mật khẩu mới thay mật khẩu tạm, rồi đi tiếp bước 1 như đăng nhập thường.
+   *
+   * Thu hồi MỌI refresh token của người này: ai đã đăng nhập bằng mật khẩu tạm
+   * trước đó (người vận hành thử hộ chẳng hạn) đều bị đẩy ra.
+   */
+  async changePassword(preToken: string, newPassword: string): Promise<LoginResponse> {
+    const claims = await this.verifyPreToken(preToken, 'CHANGE_PASSWORD');
+    const cur = await this.db
+      .selectFrom('identity')
+      .select(['password_hash', 'status'])
+      .where('id', '=', claims.sub)
+      .executeTakeFirst();
+    if (!cur || cur.status !== 'ACTIVE') throw new ForbiddenException('ACCOUNT_LOCKED');
+    if (cur.password_hash && (await bcrypt.compare(newPassword, cur.password_hash))) {
+      throw new BadRequestException({ code: 'SAME_PASSWORD', message: 'Mật khẩu mới phải khác mật khẩu tạm.' });
+    }
+
+    await this.db
+      .updateTable('identity')
+      .set({ password_hash: await bcrypt.hash(newPassword, 10), must_change_password: false, updated_at: new Date() })
+      .where('id', '=', claims.sub)
+      .execute();
+    await this.db
+      .updateTable('refresh_token')
+      .set({ revoked_at: new Date(), revoked_reason: 'PASSWORD_CHANGED' })
+      .where('identity_id', '=', claims.sub)
+      .where('revoked_at', 'is', null)
+      .execute();
+
+    return this.completeAuthentication(claims.sub, 'pwd');
   }
 
   /**
@@ -92,7 +158,7 @@ export class AuthService {
    * Hai đường tự dựng preToken riêng là hai chỗ để lệch nhau về sau (thời hạn,
    * claim thiếu), và lệch ở đây là lệch về bảo mật.
    */
-  async completeAuthentication(identityId: string): Promise<LoginResponse> {
+  async completeAuthentication(identityId: string, amr: 'pwd' | 'otp'): Promise<LoginResponse> {
     const identity = await this.db
       .selectFrom('identity')
       .select(['id', 'full_name'])
@@ -100,17 +166,29 @@ export class AuthService {
       .executeTakeFirstOrThrow();
 
     const tenants = await this.tenantsOf(identity.id);
-    if (tenants.length === 0) throw new ForbiddenException('NO_TENANT_MEMBERSHIP');
+    // Cửa nền tảng chỉ hiện với đăng nhập bằng mật khẩu — xem LoginResponse.platform.
+    const level = amr === 'pwd' ? await this.platformLevelOf(identity.id) : null;
+    if (tenants.length === 0 && !level) throw new ForbiddenException('NO_TENANT_MEMBERSHIP');
 
     const preToken = await this.jwt.signAsync(
-      { sub: identity.id, stage: 'SELECT_TENANT' } satisfies Omit<PreTokenClaims, 'iat' | 'exp'>,
+      { sub: identity.id, stage: 'SELECT_TENANT', amr } satisfies Omit<PreTokenClaims, 'iat' | 'exp'>,
       { secret: this.cfg.getOrThrow('JWT_ACCESS_SECRET'), expiresIn: '5m' },
     );
 
-    return { preToken, identityId: identity.id, fullName: identity.full_name, tenants };
+    return {
+      preToken,
+      identityId: identity.id,
+      fullName: identity.full_name,
+      tenants,
+      platform: level ? { level } : null,
+      mustChangePassword: false,
+    };
   }
 
-  async selectTenant(preToken: string, tenantId: string, ua?: string): Promise<SessionResponse> {
+  private async verifyPreToken(
+    preToken: string,
+    stage: PreTokenClaims['stage'] = 'SELECT_TENANT',
+  ): Promise<PreTokenClaims> {
     let claims: PreTokenClaims;
     try {
       claims = await this.jwt.verifyAsync<PreTokenClaims>(preToken, {
@@ -119,8 +197,12 @@ export class AuthService {
     } catch {
       throw new UnauthorizedException('INVALID_PRE_TOKEN');
     }
-    if (claims.stage !== 'SELECT_TENANT') throw new UnauthorizedException('INVALID_PRE_TOKEN');
+    if (claims.stage !== stage) throw new UnauthorizedException('INVALID_PRE_TOKEN');
+    return claims;
+  }
 
+  async selectTenant(preToken: string, tenantId: string, ua?: string): Promise<SessionResponse> {
+    const claims = await this.verifyPreToken(preToken);
     const tenants = await this.tenantsOf(claims.sub);
     const chosen = tenants.find((t) => t.tenantId === tenantId);
     if (!chosen) throw new ForbiddenException('NOT_A_MEMBER_OF_TENANT');
@@ -128,10 +210,24 @@ export class AuthService {
     return this.issueSession(claims.sub, chosen, randomUUID(), ua);
   }
 
-  async refresh(rawToken: string, ua?: string): Promise<SessionResponse> {
+  /**
+   * Bước 2, nhánh nền tảng: đổi preToken lấy phiên quản trị nền tảng.
+   *
+   * Tra lại platform_admin Ở ĐÂY (không tin LoginResponse của bước 1): preToken
+   * sống 5 phút, và người đó có thể vừa bị thu quyền trong 5 phút ấy.
+   */
+  async selectPlatform(preToken: string, ua?: string): Promise<PlatformSessionResponse> {
+    const claims = await this.verifyPreToken(preToken);
+    if (claims.amr !== 'pwd') throw new ForbiddenException('PLATFORM_REQUIRES_PASSWORD');
+    const level = await this.platformLevelOf(claims.sub);
+    if (!level) throw new ForbiddenException('NOT_A_PLATFORM_ADMIN');
+    return this.issuePlatformSession(claims.sub, level, randomUUID(), ua);
+  }
+
+  async refresh(rawToken: string, ua?: string): Promise<SessionResponse | PlatformSessionResponse> {
     const row = await this.db
       .selectFrom('refresh_token')
-      .select(['id', 'identity_id', 'tenant_id', 'family_id', 'expires_at', 'revoked_at'])
+      .select(['id', 'identity_id', 'tenant_id', 'family_id', 'expires_at', 'revoked_at', 'revoked_reason'])
       .where('token_hash', '=', this.hashToken(rawToken))
       .executeTakeFirst();
 
@@ -139,7 +235,22 @@ export class AuthService {
 
     // Token đã bị thu hồi mà vẫn được dùng => nhiều khả năng đã bị đánh cắp.
     // Thu hồi CẢ HỌ token, buộc đăng nhập lại trên mọi thiết bị.
-    if (row.revoked_at) {
+    let duaSongSong =
+      row.revoked_at !== null &&
+      row.revoked_reason === 'ROTATED' &&
+      Date.now() - new Date(row.revoked_at).getTime() < REUSE_GRACE_MS;
+    if (duaSongSong) {
+      // Họ token đã bị đóng vì lý do khác (đăng xuất, nghi trộm, đổi mật khẩu)
+      // thì vòng dung sai không được hồi sinh nó.
+      const dong = await this.db
+        .selectFrom('refresh_token')
+        .select('id')
+        .where('family_id', '=', row.family_id)
+        .where('revoked_reason', 'in', ['REUSE_DETECTED', 'LOGOUT', 'PASSWORD_CHANGED'])
+        .executeTakeFirst();
+      if (dong) duaSongSong = false;
+    }
+    if (row.revoked_at && !duaSongSong) {
       await this.db
         .updateTable('refresh_token')
         .set({ revoked_at: new Date(), revoked_reason: 'REUSE_DETECTED' })
@@ -149,17 +260,27 @@ export class AuthService {
       throw new UnauthorizedException('REFRESH_TOKEN_REUSED');
     }
     if (row.expires_at < new Date()) throw new UnauthorizedException('REFRESH_TOKEN_EXPIRED');
-    if (!row.tenant_id) throw new UnauthorizedException('TENANT_NOT_SELECTED');
 
-    const tenants = await this.tenantsOf(row.identity_id);
-    const chosen = tenants.find((t) => t.tenantId === row.tenant_id);
-    if (!chosen) throw new ForbiddenException('NOT_A_MEMBER_OF_TENANT');
-
-    const session = await this.issueSession(row.identity_id, chosen, row.family_id, ua);
+    let session: SessionResponse | PlatformSessionResponse;
+    if (!row.tenant_id) {
+      // Refresh token không gắn phòng = phiên nền tảng. Tra lại quyền MỖI lần
+      // làm mới: thu quyền quản trị phải có hiệu lực trong một vòng access token.
+      const level = await this.platformLevelOf(row.identity_id);
+      if (!level) throw new ForbiddenException('NOT_A_PLATFORM_ADMIN');
+      session = await this.issuePlatformSession(row.identity_id, level, row.family_id, ua);
+    } else {
+      const tenants = await this.tenantsOf(row.identity_id);
+      const chosen = tenants.find((t) => t.tenantId === row.tenant_id);
+      if (!chosen) throw new ForbiddenException('NOT_A_MEMBER_OF_TENANT');
+      session = await this.issueSession(row.identity_id, chosen, row.family_id, ua);
+    }
+    // Chỉ đóng dấu lần xoay ĐẦU: lượt dùng lại trong vòng dung sai không được
+    // kéo dài vòng đó thêm 30 giây nữa.
     await this.db
       .updateTable('refresh_token')
       .set({ revoked_at: new Date(), revoked_reason: 'ROTATED' })
       .where('id', '=', row.id)
+      .where('revoked_at', 'is', null)
       .execute();
     return session;
   }
@@ -184,6 +305,15 @@ export class AuthService {
 
   // -------------------------------------------------------------------------
 
+  private async platformLevelOf(identityId: string): Promise<PlatformLevel | null> {
+    const row = await this.db
+      .selectFrom('platform_admin')
+      .select('level')
+      .where('identity_id', '=', identityId)
+      .executeTakeFirst();
+    return (row?.level as PlatformLevel | undefined) ?? null;
+  }
+
   private async tenantsOf(identityId: string): Promise<TenantOption[]> {
     const rows = await this.db
       .selectFrom('tenant_user as tu')
@@ -191,7 +321,10 @@ export class AuthService {
       .select(['t.id as tenantId', 't.slug', 't.name', 'tu.role'])
       .where('tu.identity_id', '=', identityId)
       .where('tu.status', '=', 'ACTIVE')
-      .where('t.status', 'in', ['TRIAL', 'ACTIVE', 'PAST_DUE'])
+      // SUSPENDED vẫn vào được, ở chế độ CHỈ ĐỌC (TenantStatusGuard): chủ phòng
+      // phải vào được để thấy hoá đơn dịch vụ và trả tiền. Khoá cả cửa là khoá
+      // luôn đường thoát. CLOSED thì không.
+      .where('t.status', 'in', ['TRIAL', 'ACTIVE', 'PAST_DUE', 'SUSPENDED'])
       .execute();
 
     const grouped = new Map<string, TenantOption>();
@@ -207,6 +340,41 @@ export class AuthService {
         });
     }
     return [...grouped.values()];
+  }
+
+  private async issuePlatformSession(
+    identityId: string,
+    level: PlatformLevel,
+    familyId: string,
+    ua?: string,
+  ): Promise<PlatformSessionResponse> {
+    const ttlSeconds = Number(this.cfg.get('JWT_ACCESS_TTL_SECONDS') ?? 900);
+    const accessToken = await this.jwt.signAsync(
+      { sub: identityId, scope: 'platform', pa: level } satisfies Omit<PlatformTokenClaims, 'iat' | 'exp'>,
+      { secret: this.cfg.getOrThrow('JWT_ACCESS_SECRET'), expiresIn: ttlSeconds },
+    );
+
+    // Phiên nền tảng sống NGẮN hơn phiên phòng tập: 1 ngày thay vì 30 — người
+    // cầm nó nhìn được mọi phòng tập. tenant_id NULL là dấu hiệu của nó.
+    const refreshToken = randomUUID() + randomUUID();
+    await this.db
+      .insertInto('refresh_token')
+      .values({
+        identity_id: identityId,
+        tenant_id: null,
+        token_hash: this.hashToken(refreshToken),
+        family_id: familyId,
+        expires_at: new Date(Date.now() + 24 * 3600 * 1000),
+        user_agent: ua ?? null,
+      })
+      .execute();
+
+    const idn = await this.db
+      .selectFrom('identity')
+      .select('full_name')
+      .where('id', '=', identityId)
+      .executeTakeFirstOrThrow();
+    return { accessToken, refreshToken, expiresIn: ttlSeconds, identityId, fullName: idn.full_name, level };
   }
 
   private async issueSession(

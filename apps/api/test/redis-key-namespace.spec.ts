@@ -15,11 +15,13 @@ import { globalKey, tenantKey } from '../src/redis/redis-keys';
 
 const SRC = join(__dirname, '..', 'src');
 
-/** Chỉ hai tệp này được chạm thẳng vào client Redis. */
+/** Chỉ những tệp này (đều trong src/redis/) được chạm thẳng vào client Redis. */
 const DUOC_DUNG_REDIS_THO = [
   'redis/redis.tokens.ts',
   'redis/redis.module.ts',
   'redis/rate-limit.service.ts',
+  // Không tự dựng khoá: bên gọi truyền khoá từ tenantKey()/globalKey().
+  'redis/ephemeral-store.service.ts',
 ];
 
 function walk(dir: string): string[] {

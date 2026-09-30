@@ -1,5 +1,5 @@
 import { cookies } from 'next/headers';
-import { redirect } from 'next/navigation';
+import { notFound, redirect } from 'next/navigation';
 
 /**
  * Phiên đăng nhập nằm trong cookie httpOnly, KHÔNG nằm trong localStorage.
@@ -8,22 +8,45 @@ import { redirect } from 'next/navigation';
  * ứng dụng là mất token. Cookie httpOnly thì script không chạm tới được; đổi
  * lại phải tự chống CSRF, ở đây bằng sameSite=strict + việc API chỉ nhận
  * Authorization header (form POST từ site khác không gắn được header).
+ *
+ * Access token sống 15 phút; middleware.ts tự đổi refresh token lấy token mới
+ * trước khi trang đọc tới, nên ở đây cứ coi cookie là đang còn hạn.
  */
-export const COOKIE_ACCESS = 'pt_at';
-export const COOKIE_REFRESH = 'pt_rt';
-export const COOKIE_TENANT = 'pt_tenant';
-/**
- * Vai trò, CHỈ để điều hướng (hội viên vào /me, nhân viên vào /members).
- * KHÔNG dùng để phân quyền: cookie do máy chủ Next đặt nhưng phân quyền thật
- * nằm ở claim trong access token mà API tự kiểm.
- */
-export const COOKIE_ROLES = 'pt_roles';
+import {
+  COOKIE_ACCESS,
+  COOKIE_NAME,
+  COOKIE_PLATFORM,
+  COOKIE_ROLES,
+  COOKIE_TENANT,
+} from './session-cookies';
+
+export {
+  COOKIE_ACCESS,
+  COOKIE_NAME,
+  COOKIE_PLATFORM,
+  COOKIE_REFRESH,
+  COOKIE_ROLES,
+  COOKIE_TENANT,
+} from './session-cookies';
+
+export const STAFF_ROLES = ['OWNER', 'ADMIN', 'RECEPTION', 'PT'];
 
 export type Session = {
   accessToken: string;
   tenantName: string;
+  fullName: string;
   roles: string[];
+  /** Có giá trị = phiên quản trị nền tảng, không thuộc phòng tập nào. */
+  platformLevel: string | null;
 };
+
+export const isStaff = (s: Session) => s.roles.some((r) => STAFF_ROLES.includes(r));
+export const isPlatform = (s: Session) => s.platformLevel !== null;
+
+const THU_TU_CAP = ['SUPPORT', 'OPS', 'SUPER'];
+/** Phiên nền tảng có đủ cấp `can` không — chỉ để ẩn nút, API vẫn tự kiểm. */
+export const duCap = (s: Session, can: 'SUPPORT' | 'OPS' | 'SUPER') =>
+  THU_TU_CAP.indexOf(s.platformLevel ?? '') >= THU_TU_CAP.indexOf(can);
 
 export async function getSession(): Promise<Session | null> {
   const jar = await cookies();
@@ -32,7 +55,9 @@ export async function getSession(): Promise<Session | null> {
   return {
     accessToken,
     tenantName: jar.get(COOKIE_TENANT)?.value ?? '',
+    fullName: jar.get(COOKIE_NAME)?.value ?? '',
     roles: (jar.get(COOKIE_ROLES)?.value ?? '').split(',').filter(Boolean),
+    platformLevel: jar.get(COOKIE_PLATFORM)?.value || null,
   };
 }
 
@@ -56,6 +81,7 @@ export async function apiFetch<T>(path: string, session: Session): Promise<T> {
     cache: 'no-store',
   });
   if (res.status === 401) redirect('/login');
+  if (res.status === 404) notFound();
   if (!res.ok) throw new Error(`API ${path} lỗi ${res.status}`);
   return res.json() as Promise<T>;
 }

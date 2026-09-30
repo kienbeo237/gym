@@ -34,7 +34,7 @@ export class PackageService {
       const rows = await base
         .select((eb) => [
           'p.id', 'p.code', 'p.name', 'p.kind', 'p.sessions', 'p.valid_days as validDays',
-          'p.price', 'p.is_active as isActive', 'p.sort_order as sortOrder',
+          'p.price', 'p.is_active as isActive', 'p.sort_order as sortOrder', 'p.description',
           'p.late_cancel_hours as lateCancelHours',
           'p.late_cancel_deducts as lateCancelDeducts',
           'p.no_show_deducts as noShowDeducts',
@@ -75,6 +75,7 @@ export class PackageService {
             pricePerSession: Math.round(Number(r.price) / r.sessions),
             isActive: r.isActive,
             sortOrder: r.sortOrder,
+            description: r.description,
             soldCount: Number(r.soldCount ?? 0),
             effectivePolicy: {
               lateCancelHours: r.lateCancelHours ?? mac.late_cancel_hours,

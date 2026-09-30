@@ -1,5 +1,5 @@
 import { Inject, Injectable, InternalServerErrorException } from '@nestjs/common';
-import { Kysely, type Transaction } from 'kysely';
+import { Kysely, sql, type Transaction } from 'kysely';
 import type { DB } from '@pt/contracts';
 import { DB_APP } from '../db/database.module';
 import { currentContext } from './tenant-context';
@@ -59,5 +59,36 @@ export class TenantDb {
         .executeTakeFirstOrThrow();
       return fn(tx);
     });
+  }
+
+  // ---------------------------------------------------------------------------
+  // Hai cửa XUYÊN TENANT duy nhất, dành cho worker (migration 0015).
+  //
+  // Cả hai gọi hàm SECURITY DEFINER chỉ trả về MÃ ĐỊNH DANH, không trả nội dung.
+  // Nội dung đọc sau đó bằng runAs(tenantId) — tức vẫn đi qua RLS. Đặt chúng ở
+  // đây (thay vì cho worker cầm Kysely thô) để cổng gác kỷ luật CSDL vẫn nguyên:
+  // TenantDb vẫn là tệp duy nhất chạm DB_APP.
+  // ---------------------------------------------------------------------------
+
+  /** Lấy tối đa `limit` tin đến hạn, đặt SENDING với lease `leaseSeconds`. */
+  async claimDueOutbox(limit: number, leaseSeconds: number): Promise<{ id: string; tenantId: string }[]> {
+    const { rows } = await sql<{ id: string; tenant_id: string }>`
+      SELECT id, tenant_id FROM outbox_claim_due(${limit}::int, ${leaseSeconds}::int)
+    `.execute(this.db);
+    return rows.map((r) => ({ id: String(r.id), tenantId: r.tenant_id }));
+  }
+
+  /**
+   * Làm mới báo cáo tổng hợp (mọi phòng cùng lúc — matview là một khối). Hàm
+   * SECURITY DEFINER không trả dòng nào nên không lộ dữ liệu (migration 0012).
+   */
+  async refreshReporting(): Promise<void> {
+    await sql`SELECT refresh_reporting()`.execute(this.db);
+  }
+
+  /** Các phòng tập đang hoạt động — để job định kỳ lặp qua từng phòng. */
+  async workerTenantIds(): Promise<string[]> {
+    const { rows } = await sql<{ id: string }>`SELECT worker_tenant_ids() AS id`.execute(this.db);
+    return rows.map((r) => r.id);
   }
 }

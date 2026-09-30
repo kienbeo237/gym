@@ -1,89 +1,144 @@
+import Link from 'next/link';
+import { CalendarDays, CalendarPlus, CalendarX, CircleCheck, UserRound } from 'lucide-react';
 import type { BookingItem } from '@pt/contracts';
+import { BookingActions } from '../../../components/booking-actions';
+import { Alert, Badge, EmptyState, type Tone } from '../../../components/ui';
+import { TZ, dichNgay, gioVN, ngayVN } from '../../../lib/format';
 import { apiFetch, requireSession } from '../../../lib/session';
 
-const TZ = 'Asia/Ho_Chi_Minh';
-
-const NHAN: Record<BookingItem['status'], { text: string; mau: string }> = {
-  BOOKED: { text: 'Sắp tới', mau: '#93c5fd' },
-  CHECKED_IN: { text: 'Đã điểm danh', mau: '#4ade80' },
-  COMPLETED: { text: 'Đã tập xong', mau: '#4ade80' },
-  NO_SHOW: { text: 'Vắng mặt', mau: '#f87171' },
-  CANCELLED_BY_MEMBER: { text: 'Bạn đã huỷ', mau: '#8b93a7' },
-  CANCELLED_BY_PT: { text: 'Huấn luyện viên huỷ', mau: '#8b93a7' },
-  CANCELLED_BY_STAFF: { text: 'Phòng tập huỷ', mau: '#8b93a7' },
+const NHAN: Record<BookingItem['status'], { text: string; tone: Tone }> = {
+  BOOKED: { text: 'Sắp tới', tone: 'info' },
+  CHECKED_IN: { text: 'Đã điểm danh', tone: 'success' },
+  COMPLETED: { text: 'Đã tập xong', tone: 'success' },
+  NO_SHOW: { text: 'Vắng mặt', tone: 'danger' },
+  CANCELLED_BY_MEMBER: { text: 'Bạn đã huỷ', tone: 'neutral' },
+  CANCELLED_BY_PT: { text: 'HLV huỷ', tone: 'neutral' },
+  CANCELLED_BY_STAFF: { text: 'Phòng tập huỷ', tone: 'neutral' },
 };
 
-const dich = (base: string, n: number) => {
-  const d = new Date(`${base}T00:00:00Z`);
-  d.setUTCDate(d.getUTCDate() + n);
-  return d.toISOString().slice(0, 10);
-};
+function The({ b, sapToi }: { b: BookingItem; sapToi?: boolean }) {
+  const n = NHAN[b.status];
+  const d = new Date(b.startsAt);
+  return (
+    <article className="card list-card">
+      <div className="row" style={{ alignItems: 'flex-start' }}>
+        <div className="row-start" style={{ alignItems: 'flex-start' }}>
+          <div
+            className="icon-tile"
+            data-tone={n.tone === 'info' ? undefined : n.tone}
+            style={{ flexDirection: 'column', gap: 0, lineHeight: 1.05 }}
+          >
+            <span style={{ fontSize: 10, fontWeight: 600, textTransform: 'uppercase' }}>
+              {d.toLocaleDateString('vi-VN', { timeZone: TZ, weekday: 'short' })}
+            </span>
+            <span style={{ fontSize: 16, fontWeight: 800 }}>
+              {d.toLocaleDateString('vi-VN', { timeZone: TZ, day: '2-digit' })}
+            </span>
+          </div>
+          <div>
+            <div className="strong">
+              {gioVN(b.startsAt)} – {gioVN(b.endsAt)}
+              <span className="muted" style={{ fontWeight: 400 }}>
+                {' · '}
+                {d.toLocaleDateString('vi-VN', { timeZone: TZ, day: '2-digit', month: '2-digit' })}
+              </span>
+            </div>
+            <div className="meta-line mt-4">
+              <span>
+                <UserRound size={13} /> {b.trainerName}
+              </span>
+            </div>
+          </div>
+        </div>
+        <Badge tone={n.tone}>{n.text}</Badge>
+      </div>
+      {/* Buổi đã huỷ mà VẪN bị trừ là điều hội viên sẽ thắc mắc — nói ra
+          ngay trên thẻ thay vì để họ tự đối chiếu số buổi. */}
+      {b.deducted && b.status !== 'CHECKED_IN' && b.status !== 'COMPLETED' && (
+        <span className="small text-warning strong">Buổi này đã bị trừ khỏi gói</span>
+      )}
+      {b.cancelReason && <span className="small muted">Lý do: {b.cancelReason}</span>}
+      {sapToi && <BookingActions booking={b} vai="MEMBER" />}
+    </article>
+  );
+}
 
-export default async function MeSchedule() {
+export default async function MeSchedule({ searchParams }: { searchParams: Promise<{ booked?: string }> }) {
   const session = await requireSession();
-  const homNay = new Date().toLocaleDateString('en-CA', { timeZone: TZ });
+  const { booked } = await searchParams;
+  const homNay = ngayVN();
 
   // Endpoint này tự ép phạm vi về chính người gọi khi họ chỉ là hội viên —
   // không truyền memberId lên, và truyền cũng vô ích.
   const rows = await apiFetch<BookingItem[]>(
-    `/bookings?from=${dich(homNay, -30)}&to=${dich(homNay, 60)}`,
+    `/bookings?from=${dichNgay(homNay, -30)}&to=${dichNgay(homNay, 60)}`,
     session,
   );
 
-  const sapToi = rows.filter((b) => b.startsAt >= new Date().toISOString() && b.status === 'BOOKED');
-  const daQua = rows.filter((b) => !sapToi.includes(b)).reverse();
-
-  const The = ({ b }: { b: BookingItem }) => {
-    const n = NHAN[b.status];
-    return (
-      <article style={{ ...S.card, borderLeft: `3px solid ${n.mau}` }}>
-        <div style={S.hang}>
-          <strong style={S.gio}>
-            {new Date(b.startsAt).toLocaleString('vi-VN', {
-              timeZone: TZ, weekday: 'short', day: '2-digit', month: '2-digit',
-              hour: '2-digit', minute: '2-digit',
-            })}
-          </strong>
-          <span style={{ ...S.nhan, color: n.mau }}>{n.text}</span>
-        </div>
-        <span style={S.phu}>Huấn luyện viên: {b.trainerName}</span>
-        {/* Buổi đã huỷ mà VẪN bị trừ là điều hội viên sẽ thắc mắc — nói ra
-            ngay trên thẻ thay vì để họ tự đối chiếu số buổi. */}
-        {b.deducted && b.status !== 'CHECKED_IN' && b.status !== 'COMPLETED' && (
-          <span style={S.truBuoi}>Buổi này đã bị trừ khỏi gói</span>
-        )}
-        {b.cancelReason && <span style={S.lyDo}>Lý do: {b.cancelReason}</span>}
-      </article>
-    );
-  };
+  const bayGio = new Date().toISOString();
+  const sapToi = rows
+    .filter((b) => b.startsAt >= bayGio && b.status === 'BOOKED')
+    .sort((a, b) => a.startsAt.localeCompare(b.startsAt));
+  const daQua = rows
+    .filter((b) => !sapToi.includes(b))
+    .sort((a, b) => b.startsAt.localeCompare(a.startsAt));
 
   return (
     <>
-      <h1 style={S.h1}>Lịch tập của bạn</h1>
+      <div className="row" style={{ alignItems: 'flex-start' }}>
+        <div>
+          <h1 className="m-title">Lịch tập của bạn</h1>
+          <p className="m-sub">30 ngày trước đến 60 ngày tới</p>
+        </div>
+        <Link href="/me/book" className="btn btn-primary btn-sm">
+          <CalendarPlus size={15} /> Đặt lịch
+        </Link>
+      </div>
 
-      <h2 style={S.h2}>Sắp tới ({sapToi.length})</h2>
-      {sapToi.length === 0 && <p style={S.trong}>Bạn chưa có buổi tập nào sắp tới.</p>}
-      {sapToi.map((b) => <The key={b.id} b={b} />)}
+      {booked === '1' && (
+        <div className="mt-16">
+          <Alert tone="success" icon={CircleCheck}>
+            <span>Đã đặt lịch. HLV nhận được thông báo; bạn sẽ được nhắc trước giờ tập.</span>
+          </Alert>
+        </div>
+      )}
 
-      <h2 style={S.h2}>Đã qua</h2>
-      {daQua.length === 0 && <p style={S.trong}>Chưa có buổi tập nào.</p>}
-      {daQua.slice(0, 30).map((b) => <The key={b.id} b={b} />)}
+      <h2 className="m-section">
+        Sắp tới <Badge tone="primary">{sapToi.length}</Badge>
+      </h2>
+      {sapToi.length === 0 ? (
+        <div className="card">
+          <EmptyState
+            icon={CalendarDays}
+            title="Chưa có buổi sắp tới"
+            text="Chọn giờ trống của huấn luyện viên để đặt buổi tiếp theo."
+            action={
+              <Link href="/me/book" className="btn btn-primary btn-sm">
+                <CalendarPlus size={15} /> Đặt lịch
+              </Link>
+            }
+          />
+        </div>
+      ) : (
+        <div className="stack">
+          {sapToi.map((b) => (
+            <The key={b.id} b={b} sapToi />
+          ))}
+        </div>
+      )}
+
+      <h2 className="m-section">Đã qua</h2>
+      {daQua.length === 0 ? (
+        <div className="card">
+          <EmptyState icon={CalendarX} title="Chưa có buổi tập nào" />
+        </div>
+      ) : (
+        <div className="stack">
+          {daQua.slice(0, 30).map((b) => (
+            <The key={b.id} b={b} />
+          ))}
+        </div>
+      )}
     </>
   );
 }
-
-const S: Record<string, React.CSSProperties> = {
-  h1: { margin: '0 0 4px', fontSize: 22 },
-  h2: { margin: '20px 0 10px', fontSize: 13, color: '#b6bdcd' },
-  trong: { fontSize: 13, color: '#8b93a7' },
-  card: {
-    background: '#171a21', border: '1px solid #262b36', borderRadius: 10,
-    padding: '12px 14px', marginBottom: 8, display: 'flex', flexDirection: 'column', gap: 3,
-  },
-  hang: { display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'baseline' },
-  gio: { fontSize: 14 },
-  nhan: { fontSize: 11, whiteSpace: 'nowrap' },
-  phu: { fontSize: 12, color: '#8b93a7' },
-  truBuoi: { fontSize: 11, color: '#fbbf24', marginTop: 3 },
-  lyDo: { fontSize: 11, color: '#8b93a7', fontStyle: 'italic' },
-};

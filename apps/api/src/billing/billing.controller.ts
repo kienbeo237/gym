@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, ParseUUIDPipe, Post, Query } from '@nestjs/common';
+import { Body, Controller, Get, Param, ParseUUIDPipe, Post, Query, StreamableFile } from '@nestjs/common';
 import {
   ListInvoiceQuery,
   RecordPaymentRequest,
@@ -9,12 +9,16 @@ import {
   type PaymentResult,
 } from '@pt/contracts';
 import { BillingService } from './billing.service';
+import { InvoicePdfService } from './invoice-pdf.service';
 import { Roles } from '../common/auth.guard';
 import { ZodPipe } from '../common/zod.pipe';
 
 @Controller('invoices')
 export class BillingController {
-  constructor(private readonly billing: BillingService) {}
+  constructor(
+    private readonly billing: BillingService,
+    private readonly pdf: InvoicePdfService,
+  ) {}
 
   @Get()
   @Roles('OWNER', 'ADMIN', 'RECEPTION')
@@ -26,6 +30,18 @@ export class BillingController {
   @Roles('OWNER', 'ADMIN', 'RECEPTION')
   detail(@Param('id', ParseUUIDPipe) id: string): Promise<InvoiceDetail> {
     return this.billing.detail(id);
+  }
+
+  // Hội viên tải được — nhưng chỉ hoá đơn của chính mình (kiểm trong service).
+  @Get(':id/pdf')
+  @Roles('OWNER', 'ADMIN', 'RECEPTION', 'MEMBER')
+  async pdfFile(@Param('id', ParseUUIDPipe) id: string): Promise<StreamableFile> {
+    const { code, pdf } = await this.pdf.build(id);
+    return new StreamableFile(pdf, {
+      type: 'application/pdf',
+      disposition: `inline; filename="${code}.pdf"`,
+      length: pdf.length,
+    });
   }
 
   // Lễ tân thu tiền — đó là việc của quầy. PT thì không: người bán tự xác nhận

@@ -1,8 +1,16 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { sql } from 'kysely';
-import type { CreateMemberRequest, ListMemberQuery, MemberSummary, Paged } from '@pt/contracts';
+import type {
+  CreateMemberRequest,
+  ListMemberQuery,
+  MemberDetail,
+  MemberSummary,
+  Paged,
+  UpdateMemberRequest,
+} from '@pt/contracts';
 import { TenantDb } from '../common/tenant-db.service';
 import { requireContext } from '../common/tenant-context';
+import { loiHanMucGoi } from '../common/saas-policy';
 
 @Injectable()
 export class MemberService {
@@ -100,6 +108,119 @@ export class MemberService {
     });
   }
 
+  async detail(id: string): Promise<MemberDetail> {
+    return this.tdb.run(async (tx) => {
+      const m = await tx
+        .selectFrom('member as m')
+        .innerJoin('identity as i', 'i.id', 'm.identity_id')
+        .select([
+          'm.id', 'm.code', 'i.full_name as fullName', 'i.phone', 'i.email', 'm.dob', 'm.gender',
+          'm.status', 'm.source', 'm.note', 'm.created_at as joinedAt',
+        ])
+        .where('m.id', '=', id)
+        .executeTakeFirst();
+      if (!m) throw new NotFoundException('MEMBER_NOT_FOUND');
+
+      const rows = await tx
+        .selectFrom('member_package as mp')
+        .innerJoin('package_template as pt', 'pt.id', 'mp.template_id')
+        .leftJoin('trainer as t', 't.id', 'mp.trainer_id')
+        .leftJoin('identity as ti', 'ti.id', 't.identity_id')
+        .select((eb) => [
+          'mp.id', 'mp.code', 'mp.name_snapshot as name', 'pt.kind', 'mp.status',
+          'mp.sessions_total as sessionsTotal', 'mp.sessions_remaining as sessionsRemaining',
+          'mp.starts_on as startsOn', 'mp.expires_on as expiresOn',
+          'mp.trainer_id as trainerId', 'ti.full_name as trainerName',
+          eb
+            .selectFrom('booking as b')
+            .select((e) => e.fn.countAll<string>().as('c'))
+            .whereRef('b.member_package_id', '=', 'mp.id')
+            .where('b.status', '=', 'BOOKED')
+            .as('booked'),
+          eb
+            .selectFrom('invoice_item as ii')
+            .innerJoin('invoice as inv', 'inv.id', 'ii.invoice_id')
+            .select((e) =>
+              e.fn.coalesce(e.fn.sum<string>(sql`inv.total_amount - inv.paid_amount`), e.val('0')).as('s'),
+            )
+            .whereRef('ii.member_package_id', '=', 'mp.id')
+            .where('inv.status', 'in', ['OPEN', 'PARTIALLY_PAID'])
+            .as('outstanding'),
+        ])
+        .where('mp.member_id', '=', id)
+        // Đang dùng lên đầu, rồi mới nhất trước.
+        .orderBy(sql`mp.status = 'ACTIVE'`, 'desc')
+        .orderBy('mp.starts_on', 'desc')
+        .execute();
+
+      return {
+        id: m.id,
+        code: m.code,
+        fullName: m.fullName,
+        phone: m.phone,
+        email: m.email,
+        dob: m.dob ? String(m.dob) : null,
+        gender: m.gender,
+        status: m.status,
+        source: m.source,
+        note: m.note,
+        joinedAt: new Date(m.joinedAt).toISOString(),
+        packages: rows.map((r) => ({
+          id: r.id,
+          code: r.code,
+          name: r.name,
+          kind: r.kind,
+          status: r.status,
+          sessionsTotal: r.sessionsTotal,
+          sessionsRemaining: r.sessionsRemaining,
+          sessionsBooked: Number(r.booked ?? 0),
+          startsOn: String(r.startsOn),
+          expiresOn: String(r.expiresOn),
+          trainerId: r.trainerId,
+          trainerName: r.trainerName,
+          outstanding: Number(r.outstanding ?? 0),
+        })),
+      };
+    });
+  }
+
+  async update(id: string, dto: UpdateMemberRequest): Promise<void> {
+    const ctx = requireContext();
+    await this.tdb.run(async (tx) => {
+      const truoc = await tx
+        .selectFrom('member')
+        .select(['dob', 'gender', 'source', 'note', 'status'])
+        .where('id', '=', id)
+        .forUpdate()
+        .executeTakeFirst();
+      if (!truoc) throw new NotFoundException('MEMBER_NOT_FOUND');
+
+      const doi = {
+        ...(dto.dob !== undefined ? { dob: dto.dob } : {}),
+        ...(dto.gender !== undefined ? { gender: dto.gender } : {}),
+        ...(dto.source !== undefined ? { source: dto.source } : {}),
+        ...(dto.note !== undefined ? { note: dto.note } : {}),
+        ...(dto.status !== undefined ? { status: dto.status } : {}),
+      };
+      // Body rỗng: không có gì để SET (Kysely sẽ sinh SQL sai cú pháp).
+      if (Object.keys(doi).length === 0) return;
+      await tx.updateTable('member').set(doi).where('id', '=', id).execute();
+
+      await tx
+        .insertInto('audit_log')
+        .values({
+          tenant_id: ctx.tenantId,
+          actor_id: ctx.identityId,
+          action: 'MEMBER_UPDATED',
+          entity: 'member',
+          entity_id: id,
+          before: JSON.stringify(truoc),
+          after: JSON.stringify(dto),
+        })
+        .execute();
+    });
+  }
+
   async create(dto: CreateMemberRequest): Promise<{ id: string; code: string }> {
     const ctx = requireContext();
 
@@ -107,18 +228,9 @@ export class MemberService {
       // 1) Hạn mức gói SaaS. Hàm này giữ advisory lock theo (tenant,'member')
       //    tới hết transaction — nhờ đó bước sinh mã hội viên bên dưới cũng
       //    được tuần tự hoá, không cần khoá thứ hai.
-      try {
-        await sql`SELECT assert_quota(${ctx.tenantId}::uuid, 'member')`.execute(tx);
-      } catch (e) {
-        const msg = e instanceof Error ? e.message : String(e);
-        if (msg.includes('QUOTA_EXCEEDED')) {
-          throw new BadRequestException({
-            code: 'QUOTA_EXCEEDED',
-            message: 'Đã đạt số hội viên tối đa của gói dịch vụ hiện tại',
-          });
-        }
-        throw e;
-      }
+      await sql`SELECT assert_quota(${ctx.tenantId}::uuid, 'member')`
+        .execute(tx)
+        .catch((e: unknown) => loiHanMucGoi(e, 'member'));
 
       // 2) Người này có thể ĐÃ có định danh vì đang tập ở phòng khác. RLS cố ý
       //    không cho đọc định danh đó, nên đi qua cửa hẹp SECURITY DEFINER —

@@ -3,6 +3,7 @@ import {
   ClosePayrollRequest,
   DashboardQuery,
   PeriodMonth,
+  ReopenPayrollRequest,
   type DashboardResponse,
   type PackageReportRow,
   type PayrollResponse,
@@ -56,6 +57,13 @@ export class ReportController {
   @Roles('OWNER')
   close(@Body(new ZodPipe(ClosePayrollRequest)) dto: ClosePayrollRequest): Promise<PayrollResponse> {
     return this.payroll.close(dto);
+  }
+
+  /** Mở lại bảng lương chốt nhầm (chưa chi). Lý do bắt buộc, vào nhật ký. */
+  @Post('payroll/reopen')
+  @Roles('OWNER')
+  reopen(@Body(new ZodPipe(ReopenPayrollRequest)) dto: ReopenPayrollRequest): Promise<PayrollResponse> {
+    return this.payroll.reopen(dto);
   }
 
   @Post('payroll/mark-paid')

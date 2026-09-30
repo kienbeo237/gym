@@ -126,9 +126,12 @@ async function makeTenant(
 
   // --- chiến dịch ---
   await db.query(
-    `INSERT INTO campaign (tenant_id, code, name, trigger_type, threshold, channel, template_code)
-     VALUES ($1,'LOW_BAL','Gói sắp hết buổi','LOW_SESSION_BALANCE',3,'ZALO_ZNS','PACKAGE_LOW_BALANCE'),
-            ($1,'EXPIRING','Gói sắp hết hạn','PACKAGE_EXPIRING',7,'ZALO_ZNS','PACKAGE_EXPIRING')`,
+    `INSERT INTO campaign (tenant_id, code, name, trigger_type, threshold, channel, template_code, cooldown_days)
+     VALUES ($1,'LOW_BAL','Gói sắp hết buổi','LOW_SESSION_BALANCE',3,'ZALO_ZNS','PACKAGE_LOW_BALANCE',0),
+            ($1,'EXPIRING','Gói sắp hết hạn','PACKAGE_EXPIRING',7,'ZALO_ZNS','PACKAGE_EXPIRING',0),
+            ($1,'INACTIVE','Lâu không tới tập','INACTIVE_MEMBER',14,'ZALO_ZNS','MEMBER_INACTIVE',14),
+            ($1,'BIRTHDAY','Chúc mừng sinh nhật','BIRTHDAY',0,'ZALO_ZNS','BIRTHDAY_GREETING',0),
+            ($1,'PAY_DUE','Nhắc đóng tiền trả góp','PAYMENT_DUE',3,'ZALO_ZNS','PAYMENT_DUE',0)`,
     [tenantId],
   );
 
@@ -241,15 +244,20 @@ async function main() {
       return;
     }
 
-    await db.query(
-      `INSERT INTO plan (code, name, max_trainers, max_members, max_messages_month, price_monthly, sort_order)
-       VALUES ('FREE','Dùng thử',  2,   50,   200,        0, 1),
-              ('BASIC','Cơ bản',   5,  300,  2000,  990000, 2),
-              ('PRO','Chuyên nghiệp', 20, 2000, 20000, 2990000, 3)`,
-    );
+    // Danh mục gói do migration 0016 tạo — seed không tạo lại.
 
     const hash = await bcrypt.hash(PASSWORD, 10);
     const ctx: Ctx = { db, hash };
+
+    // Quản trị nền tảng: không thuộc phòng tập nào. Môi trường thật tạo tay
+    // bằng SQL (deploy/README.md) — không bao giờ qua seed.
+    const adminId = randomUUID();
+    await db.query(
+      `INSERT INTO identity (id, phone, full_name, password_hash, phone_verified_at)
+       VALUES ($1, '+84900000001', 'Quản trị nền tảng', $2, now())`,
+      [adminId, hash],
+    );
+    await db.query(`INSERT INTO platform_admin (identity_id, level) VALUES ($1, 'SUPER')`, [adminId]);
 
     const a = await makeTenant(ctx, 'gym-alpha', 'Alpha Fitness', 1);
     const b = await makeTenant(ctx, 'gym-beta', 'Beta Gym', 2);
@@ -262,6 +270,7 @@ async function main() {
     console.log(`  gym-beta   ${b.tenantId}`);
     console.log(`Đăng nhập dev: +84901000001 / ${PASSWORD} (chủ phòng Alpha)`);
     console.log(`               +84902000001 / ${PASSWORD} (chủ phòng Beta)`);
+    console.log(`               +84900000001 / ${PASSWORD} (quản trị nền tảng)`);
   } finally {
     await db.end();
   }

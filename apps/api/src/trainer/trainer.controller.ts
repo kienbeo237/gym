@@ -5,6 +5,7 @@ import {
   SetAvailabilityRequest,
   UpdateTrainerRequest,
   type Paged,
+  type TrainerDetail,
   type TrainerSummary,
 } from '@pt/contracts';
 import { TrainerService } from './trainer.service';
@@ -19,6 +20,12 @@ export class TrainerController {
   @Roles('OWNER', 'ADMIN', 'RECEPTION', 'PT')
   list(@Query(new ZodPipe(ListTrainerQuery)) q: ListTrainerQuery): Promise<Paged<TrainerSummary>> {
     return this.trainers.list(q);
+  }
+
+  @Get(':id')
+  @Roles('OWNER', 'ADMIN')
+  detail(@Param('id', ParseUUIDPipe) id: string): Promise<TrainerDetail> {
+    return this.trainers.detail(id);
   }
 
   // Thêm PT là việc của chủ phòng: nó tiêu hạn mức gói dịch vụ và kèm chính

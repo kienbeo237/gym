@@ -31,3 +31,49 @@ export const MemberSummary = z.object({
   nextBookingAt: z.string().nullable(),
 });
 export type MemberSummary = z.infer<typeof MemberSummary>;
+
+/** Một hợp đồng của hội viên, nhìn từ phía nhân viên. */
+export type MemberPackageRow = {
+  id: string;
+  code: string;
+  name: string;
+  kind: string;
+  status: string;
+  sessionsTotal: number;
+  sessionsRemaining: number;
+  /** Buổi đã đặt mà chưa tập — tính vào "còn đặt thêm được". */
+  sessionsBooked: number;
+  startsOn: string;
+  expiresOn: string;
+  trainerId: string | null;
+  trainerName: string | null;
+  outstanding: number;
+};
+
+export type MemberDetail = {
+  id: string;
+  code: string;
+  fullName: string;
+  phone: string;
+  email: string | null;
+  dob: string | null;
+  gender: string | null;
+  status: string;
+  source: string | null;
+  note: string | null;
+  joinedAt: string;
+  packages: MemberPackageRow[];
+};
+
+/**
+ * Sửa hồ sơ tại PHÒNG NÀY. Họ tên / SĐT thuộc định danh toàn cục (người này có
+ * thể là hội viên ở phòng khác) nên không sửa ở đây.
+ */
+export const UpdateMemberRequest = z.object({
+  dob: z.string().date().nullable().optional(),
+  gender: z.enum(['MALE', 'FEMALE', 'OTHER']).nullable().optional(),
+  source: z.string().max(40).nullable().optional(),
+  note: z.string().max(2000).nullable().optional(),
+  status: z.enum(['ACTIVE', 'INACTIVE', 'BANNED']).optional(),
+});
+export type UpdateMemberRequest = z.infer<typeof UpdateMemberRequest>;

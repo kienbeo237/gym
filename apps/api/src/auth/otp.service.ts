@@ -6,6 +6,8 @@ import type { DB } from '@pt/contracts';
 import { DB_AUTH } from '../db/database.module';
 import { RateLimitService } from '../redis/rate-limit.service';
 import { globalKey, phoneKeyPart } from '../redis/redis-keys';
+import { niemPhong } from '../common/secret-box';
+import { SmsApi } from '../sms/sms-api';
 
 const MA_SO_CHU_SO = 6;
 const HAN_DUNG_GIAY = 300;      // 5 phút
@@ -42,6 +44,7 @@ export class OtpService {
     @Inject(DB_AUTH) private readonly db: Kysely<DB>,
     private readonly rate: RateLimitService,
     private readonly cfg: ConfigService,
+    private readonly sms: SmsApi,
   ) {}
 
   private hash(value: string): string {
@@ -90,30 +93,101 @@ export class OtpService {
     }
 
     const code = String(randomInt(0, 10 ** MA_SO_CHU_SO)).padStart(MA_SO_CHU_SO, '0');
+    const expiresAt = new Date(Date.now() + HAN_DUNG_GIAY * 1000);
 
-    // Vô hiệu mọi mã cũ chưa dùng. Nếu không, mã cũ vẫn vào được và số lần thử
-    // thực tế nhân lên theo số lần người dùng bấm "gửi lại".
-    await this.db
-      .updateTable('otp_challenge')
-      .set({ consumed_at: new Date() })
-      .where('phone', '=', phone)
-      .where('purpose', '=', 'LOGIN')
-      .where('consumed_at', 'is', null)
-      .execute();
+    // Mã và tin gửi mã nằm trong CÙNG một transaction: có mã mà không có tin là
+    // người dùng chờ vô vọng; có tin mà không có mã là gửi đi một mã không vào được.
+    const kenh = await this.db.transaction().execute(async (trx) => {
+      // Vô hiệu mọi mã cũ chưa dùng. Nếu không, mã cũ vẫn vào được và số lần thử
+      // thực tế nhân lên theo số lần người dùng bấm "gửi lại".
+      await trx
+        .updateTable('otp_challenge')
+        .set({ consumed_at: new Date() })
+        .where('phone', '=', phone)
+        .where('purpose', '=', 'LOGIN')
+        .where('consumed_at', 'is', null)
+        .execute();
 
-    await this.db
-      .insertInto('otp_challenge')
-      .values({
-        phone,
-        purpose: 'LOGIN',
-        code_hash: this.hash(code),
-        expires_at: new Date(Date.now() + HAN_DUNG_GIAY * 1000),
-      })
-      .execute();
+      const ch = await trx
+        .insertInto('otp_challenge')
+        .values({ phone, purpose: 'LOGIN', code_hash: this.hash(code), expires_at: expiresAt })
+        .returning('id')
+        .executeTakeFirstOrThrow();
 
-    // TODO(phase 6): đẩy vào notification_outbox để worker gửi qua Zalo OA / SMS.
-    // Tới lúc đó, ghi outbox trong CÙNG transaction với INSERT ở trên.
-    this.log.log(`[DEV] OTP cho ${phone}: ${code}`);
+      // Gửi qua OA của MỘT phòng mà người này là thành viên, có OA đang kết nối
+      // và mẫu OTP đã duyệt. Chọn phòng gắn bó gần nhất: tin đến từ phòng họ
+      // vừa đăng ký là tin họ nhận ra.
+      const phong = await trx
+        .selectFrom('tenant_user as tu')
+        .innerJoin('tenant as t', 't.id', 'tu.tenant_id')
+        .innerJoin('tenant_zalo_oa as z', 'z.tenant_id', 'tu.tenant_id')
+        .innerJoin('tenant_zns_template as zt', (j) =>
+          j.onRef('zt.tenant_id', '=', 'tu.tenant_id').on('zt.template_code', '=', 'OTP_LOGIN'),
+        )
+        .select('tu.tenant_id')
+        .where('tu.identity_id', '=', identity.id)
+        .where('tu.status', '=', 'ACTIVE')
+        .where('t.status', 'in', ['TRIAL', 'ACTIVE', 'PAST_DUE'])
+        .where('z.status', '=', 'CONNECTED')
+        .where('zt.status', '=', 'APPROVED')
+        .orderBy('tu.joined_at', 'desc')
+        .limit(1)
+        .executeTakeFirst();
+
+      // Không phòng nào gửi được qua Zalo: SMS, xếp vào hộp thư của phòng gắn bó
+      // gần nhất (tên phòng đứng đầu tin, lượt SMS tính cho phòng đó). Tin Zalo
+      // gửi hỏng về sau cũng rơi sang SMS — việc đó ở worker (outbox-dispatcher).
+      let kenh: 'ZALO_ZNS' | 'SMS' = 'ZALO_ZNS';
+      let tenantId = phong?.tenant_id;
+      if (!tenantId && this.sms.enabled) {
+        const bk = await trx
+          .selectFrom('tenant_user as tu')
+          .innerJoin('tenant as t', 't.id', 'tu.tenant_id')
+          .select('tu.tenant_id')
+          .where('tu.identity_id', '=', identity.id)
+          .where('tu.status', '=', 'ACTIVE')
+          .where('t.status', 'in', ['TRIAL', 'ACTIVE', 'PAST_DUE'])
+          .orderBy('tu.joined_at', 'desc')
+          .limit(1)
+          .executeTakeFirst();
+        tenantId = bk?.tenant_id;
+        kenh = 'SMS';
+      }
+      if (!tenantId) return null;
+
+      const hv = await trx
+        .selectFrom('member')
+        .select('id')
+        .where('tenant_id', '=', tenantId)
+        .where('identity_id', '=', identity.id)
+        .executeTakeFirst();
+
+      // Mã đi vào outbox ở dạng NIÊM PHONG theo phòng — không bao giờ ở dạng
+      // thô, kể cả trong vài giây chờ worker. Worker xoá nó khỏi payload ngay
+      // khi tin kết thúc.
+      const codeEnc = niemPhong(this.cfg.getOrThrow('TENANT_SECRET_KEY'), tenantId, 'otp.code', code);
+      await trx
+        .insertInto('notification_outbox')
+        .values({
+          tenant_id: tenantId,
+          channel: kenh,
+          template_code: 'OTP_LOGIN',
+          recipient_ref: phone,
+          member_id: hv?.id ?? null,
+          idempotency_key: `OTP:${ch.id}`,
+          payload: JSON.stringify({ codeEnc: codeEnc.toString('base64'), expiresAt: expiresAt.toISOString() }),
+        })
+        .execute();
+      return kenh;
+    });
+
+    if (!kenh) {
+      // Không kênh nào: không phòng nào có OA + mẫu OTP, và SMS chưa cấu hình
+      // (hoặc người này không thuộc phòng nào đang hoạt động). Không báo cho
+      // người dùng (điểm 3 ở trên) — nhưng phải hiện trong log.
+      this.log.warn(`OTP ${kPhone}: không có kênh gửi (không phòng nào có Zalo OA + mẫu OTP_LOGIN, SMS chưa cấu hình)`);
+    }
+    if (this.laMoiTruongDev) this.log.log(`[DEV] OTP cho ${phone}: ${code}`);
 
     return this.laMoiTruongDev ? { sent: true, devCode: code } : { sent: true };
   }

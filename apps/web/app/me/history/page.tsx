@@ -1,4 +1,7 @@
+import { History } from 'lucide-react';
 import type { MyLedgerEntry } from '@pt/contracts';
+import { EmptyState } from '../../../components/ui';
+import { ngayGioVN } from '../../../lib/format';
 import { apiFetch, requireSession } from '../../../lib/session';
 
 /**
@@ -14,47 +17,40 @@ export default async function MeHistory() {
 
   return (
     <>
-      <h1 style={S.h1}>Lịch sử buổi tập</h1>
-      <p style={S.sub}>Mỗi thay đổi về số buổi đều có ở đây, kèm lý do.</p>
+      <h1 className="m-title">Lịch sử buổi tập</h1>
+      <p className="m-sub">Mỗi thay đổi về số buổi đều có ở đây, kèm lý do.</p>
 
-      {rows.length === 0 && <p style={S.trong}>Chưa có hoạt động nào.</p>}
-
-      <ol style={S.list}>
-        {rows.map((r) => (
-          <li key={r.id} style={S.item}>
-            <span style={r.delta > 0 ? S.cong : S.tru}>
-              {r.delta > 0 ? `+${r.delta}` : r.delta}
-            </span>
-            <div style={S.noiDung}>
-              <strong style={S.nhan}>{r.label}</strong>
-              <span style={S.meta}>
-                {new Date(r.at).toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' })} ·{' '}
-                {r.packageCode}
-              </span>
-              {r.note && <span style={S.ghiChu}>{r.note}</span>}
-            </div>
-            <span style={S.duSau}>còn {r.balanceAfter}</span>
-          </li>
-        ))}
-      </ol>
+      <div className="mt-16">
+        {rows.length === 0 ? (
+          <div className="card">
+            <EmptyState icon={History} title="Chưa có hoạt động nào" />
+          </div>
+        ) : (
+          <ol className="timeline">
+            {rows.map((r) => (
+              <li key={r.id} className="card list-card" style={{ flexDirection: 'row', alignItems: 'center', gap: 14 }}>
+                <span className="delta" data-dir={r.delta > 0 ? 'up' : 'down'}>
+                  {r.delta > 0 ? `+${r.delta}` : r.delta}
+                </span>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div className="strong">{r.label}</div>
+                  <div className="meta-line mt-4">
+                    <span>{ngayGioVN(r.at)}</span>
+                    <span>{r.packageCode}</span>
+                  </div>
+                  {r.note && <div className="small muted mt-4">{r.note}</div>}
+                </div>
+                <div style={{ textAlign: 'right' }}>
+                  <div className="strong num" style={{ fontSize: 16 }}>
+                    {r.balanceAfter}
+                  </div>
+                  <div className="cell-sub nowrap">còn lại</div>
+                </div>
+              </li>
+            ))}
+          </ol>
+        )}
+      </div>
     </>
   );
 }
-
-const S: Record<string, React.CSSProperties> = {
-  h1: { margin: 0, fontSize: 22 },
-  sub: { margin: '3px 0 16px', fontSize: 13, color: '#8b93a7' },
-  trong: { fontSize: 13, color: '#8b93a7' },
-  list: { listStyle: 'none', margin: 0, padding: 0, display: 'flex', flexDirection: 'column', gap: 8 },
-  item: {
-    display: 'flex', gap: 12, alignItems: 'flex-start',
-    background: '#171a21', border: '1px solid #262b36', borderRadius: 10, padding: '12px 14px',
-  },
-  cong: { fontSize: 16, fontWeight: 700, color: '#4ade80', minWidth: 34 },
-  tru: { fontSize: 16, fontWeight: 700, color: '#f87171', minWidth: 34 },
-  noiDung: { flex: 1, display: 'flex', flexDirection: 'column', gap: 2 },
-  nhan: { fontSize: 14 },
-  meta: { fontSize: 11, color: '#8b93a7' },
-  ghiChu: { fontSize: 12, color: '#b6bdcd', marginTop: 2 },
-  duSau: { fontSize: 11, color: '#8b93a7', whiteSpace: 'nowrap' },
-};
