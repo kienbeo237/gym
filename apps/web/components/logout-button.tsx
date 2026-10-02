@@ -9,16 +9,32 @@ import { LoaderCircle, LogOut } from 'lucide-react';
  *
  * Điều hướng bằng window.location thay vì router: bỏ sạch cache của App Router,
  * không để màn cũ còn dữ liệu của phiên vừa đóng.
+ *
+ * `giuTrang`: đăng nhập lại xong quay về đúng trang đang mở (vd. trang điểm
+ * danh, khi lỡ đăng nhập nhầm tài khoản).
  */
-export function LogoutButton({ className, withLabel }: { className?: string; withLabel?: boolean }) {
+export function LogoutButton({
+  className,
+  withLabel,
+  label = 'Đăng xuất',
+  giuTrang,
+}: {
+  className?: string;
+  withLabel?: boolean;
+  label?: string;
+  giuTrang?: boolean;
+}) {
   const [busy, setBusy] = useState(false);
 
   async function dangXuat() {
     setBusy(true);
+    const dich = giuTrang
+      ? `/login?next=${encodeURIComponent(window.location.pathname + window.location.search)}`
+      : '/login';
     try {
       await fetch('/api/session', { method: 'DELETE' });
     } finally {
-      window.location.replace('/login');
+      window.location.replace(dich);
     }
   }
 
@@ -28,11 +44,11 @@ export function LogoutButton({ className, withLabel }: { className?: string; wit
       className={className}
       onClick={() => void dangXuat()}
       disabled={busy}
-      title="Đăng xuất"
-      aria-label="Đăng xuất"
+      title={label}
+      aria-label={label}
     >
       {busy ? <LoaderCircle size={17} className="spin" /> : <LogOut size={17} />}
-      {withLabel && <span>Đăng xuất</span>}
+      {withLabel && <span>{label}</span>}
     </button>
   );
 }

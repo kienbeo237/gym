@@ -1089,6 +1089,60 @@ hội viên giờ cao điểm chưa tới 1 req/s. Sau 80 người dùng ảo đ
 buổi bị trừ oan, sổ cái khớp. Số để chọn cấu hình máy thật phải đo từ máy KHÁC
 vào staging (`LT_BASE=…`).
 
+### Tặng buổi: cột riêng `sessions_bonus`, doanh thu không đổi
+
+Chủ phòng / quản lý tặng 1–20 buổi kèm lý do (≥ 5 ký tự), tuỳ chọn gia hạn. Gói
+đã hết hạn thì **bắt buộc** gia hạn (tính từ hôm nay) — tặng buổi vào gói không
+dùng được là tặng suông. Buổi tặng là một dòng `BONUS` trong sổ cái; trigger
+`sync_session_remaining` giữ cả `sessions_remaining` lẫn `sessions_bonus` (0022),
+và `mp_sessions_range` nới thành `sessions_used <= total + bonus`.
+
+Doanh thu ghi nhận của gói vẫn bằng giá bán: buổi vượt `sessions_total` ghi **0
+đồng**. Hoa hồng dạy theo % của HLV thì vẫn tính trên **đơn giá bình quân** — HLV
+dạy buổi tặng vẫn là dạy. Huỷ hoá đơn đảo cả phần buổi tặng còn lại.
+
+### Điều khoản & chính sách: phiên bản, không sửa đè
+
+`tenant_terms` (0023) chỉ cho thêm. Chủ phòng soạn ở **Cài đặt → Điều khoản**,
+mỗi lần lưu là một phiên bản; hội viên đọc ở `/me/terms`. Lý do: khi tranh chấp
+phải trả lời được "lúc tôi mua gói, điều khoản nói gì". Văn bản thuần, không HTML
+— không có đường chèn script. Lưu nội dung y hệt bản hiện hành không sinh phiên
+bản mới.
+
+### Lịch tập dạng lưới giờ
+
+`/schedule?view=day|week&date=YYYY-MM-DD&trainer=<id>|all` — mọi trạng thái nằm
+trên URL (F5, gửi link, nút Back đều đúng chỗ). Điện thoại mặc định xem theo
+ngày (đoán từ User-Agent), máy tính theo tuần. HLV mặc định thấy **lịch của
+mình** (claim `trid` trong token — chỉ để chọn mặc định, quyền thật API kiểm).
+Buổi chồng giờ chia làn theo **cụm chồng nhau**, cụm khác không bị hẹp lây.
+Tham số cũ `?from=` vẫn mở đúng tuần.
+
+Ô chọn ngày / giờ dùng `react-day-picker` + Radix Popover (`components/date-picker.tsx`),
+tô bằng token CSS sẵn có — không kéo Tailwind vào. Ngày luôn là ngày địa phương
+dạng `YYYY-MM-DD`, không qua `toISOString()` (lệch một ngày sau 17h giờ VN).
+
+### Nhắc lịch cho nhân viên: chuông trong app
+
+Job `staff-remind` của worker chạy 5 phút một lần, mỗi phòng một khoá Redis, sinh
+dòng vào `staff_notification` (0024):
+
+| Loại | Người nhận | Khi nào |
+| --- | --- | --- |
+| `PT_UPCOMING` | HLV của buổi | buổi `BOOKED` bắt đầu trong ≤ 30 phút |
+| `PT_AGENDA` | HLV có buổi hôm nay | một lần/ngày, trong khung 7h–11h giờ VN |
+| `UNCHECKED` | lễ tân (không có lễ tân thì chủ phòng + quản lý) và HLV của buổi | buổi bắt đầu quá 10 phút mà chưa điểm danh; quá 2 giờ thì thôi |
+
+Idempotent bằng `UNIQUE (tenant_id, dedupe_key)` + `ON CONFLICT DO NOTHING`: chạy
+lặp, hai bản worker, chạy lại sau sập đều không trùng. Khoá nhắc giờ dạy gồm cả
+giờ bắt đầu (`REMIND:<booking>:<epoch>:<người>`) — **dời giờ thì nhắc lại**. Người
+nhận phải còn `ACTIVE` đúng vai trò. Worker dừng lâu thì khi chạy lại không xả
+thông báo cũ (khung 2 giờ, lịch ngày quá 11h bỏ qua). Giữ 60 ngày.
+
+Mỗi người chỉ đọc / đánh dấu thông báo của chính mình (`/inbox`, lọc
+`identity_id` ở mọi câu — đoán được id của người khác vẫn 404). `app_rw` chỉ có
+quyền UPDATE cột `read_at`. Chuông hỏi lại mỗi phút, thôi hỏi khi tab ẩn.
+
 ---
 
 ## Migration
@@ -1140,6 +1194,8 @@ apps/api/            NestJS
   src/platform/      quản trị nền tảng: PlatformDb (cửa duy nhất, ghi nhật ký), đối soát
   src/webhook/       webhook từ bên ngoài (SePay, báo phát Zalo) — @Public, tự xác thực bằng khoá
   src/sms/           SMS dự phòng cho OTP (driver log | off)
+  src/terms/         điều khoản & chính sách theo phiên bản
+  src/inbox/         chuông thông báo nhân viên + sinh nhắc lịch (worker gọi)
   test/              cổng gác (cách ly, kỷ luật CSDL, khoá Redis, đối soát) + test nghiệp vụ
 apps/web/            Next.js App Router, Server Component gọi API bằng cookie httpOnly
 packages/contracts/  zod DTO + type CSDL, dùng chung hai đầu
@@ -1171,6 +1227,10 @@ Theo thứ tự, vì mỗi bước dựa vào bước trước:
 | ~~11~~ | ~~Sao lưu tự động: hằng đêm + trước migration, mã hoá lên S3, xoay vòng, khôi phục thử định kỳ, cảnh báo webhook~~ — xong 30/09/2026 |
 
 ### Chưa làm, biết là chưa làm
+
+- **Nhắc lịch nhân viên mới có trong app.** Chưa đẩy qua Zalo ZNS / Web Push —
+  nhân viên phải mở app mới thấy chuông. Thêm kênh ngoài thì đi qua outbox như
+  tin của hội viên, dùng lại `dedupe_key`.
 
 - **Tích hợp Zalo CHƯA chạy với OA thật.** Mọi luồng đã chạy đầu-cuối bằng driver
   `log`; endpoint và mã lỗi của Zalo viết theo tài liệu công khai, để cấu hình

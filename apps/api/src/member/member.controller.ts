@@ -1,7 +1,9 @@
 import { Body, Controller, Get, Param, ParseUUIDPipe, Patch, Post, Query } from '@nestjs/common';
 import {
   CreateMemberRequest,
+  GiftSessionsRequest,
   ListMemberQuery,
+  type GiftSessionsResponse,
   UpdateMemberRequest,
   type MemberDetail,
   type MemberSummary,
@@ -39,5 +41,17 @@ export class MemberController {
   @Roles('OWNER', 'ADMIN', 'RECEPTION')
   update(@Param('id', ParseUUIDPipe) id: string, @Body(new ZodPipe(UpdateMemberRequest)) dto: UpdateMemberRequest) {
     return this.members.update(id, dto);
+  }
+
+  // Tặng buổi là cho đi thứ có giá: chỉ chủ phòng / quản lý. Lễ tân và HLV đề
+  // xuất qua họ — không thì quầy tự tặng cho người quen mà không ai duyệt.
+  @Post(':id/packages/:packageId/gift')
+  @Roles('OWNER', 'ADMIN')
+  gift(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('packageId', ParseUUIDPipe) packageId: string,
+    @Body(new ZodPipe(GiftSessionsRequest)) dto: GiftSessionsRequest,
+  ): Promise<GiftSessionsResponse> {
+    return this.members.giftSessions(id, packageId, dto);
   }
 }

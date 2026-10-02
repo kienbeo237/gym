@@ -146,7 +146,7 @@ export function BookingActions({
               {busy && <LoaderCircle size={14} className="spin" />}
               {slot ? `Đổi sang ${gioVN(slot.startsAt)}` : 'Chọn giờ mới'}
             </button>
-            <button type="button" className="btn btn-ghost btn-sm" onClick={() => bat(null)} disabled={busy}>Thôi</button>
+            <button type="button" className="btn btn-ghost btn-sm" onClick={() => bat(null)} disabled={busy}>Đóng</button>
           </div>
         </div>
       )}
@@ -177,7 +177,7 @@ export function BookingActions({
               {busy && <LoaderCircle size={14} className="spin" />}
               {mo === 'huy' ? 'Xác nhận huỷ' : 'Xác nhận vắng'}
             </button>
-            <button type="button" className="btn btn-ghost btn-sm" onClick={() => bat(null)} disabled={busy}>Thôi</button>
+            <button type="button" className="btn btn-ghost btn-sm" onClick={() => bat(null)} disabled={busy}>Đóng</button>
           </div>
         </form>
       )}

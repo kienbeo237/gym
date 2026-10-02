@@ -294,7 +294,7 @@ export class CheckinService {
         .executeTakeFirst(),
       tx
         .selectFrom('member_package')
-        .select(['sessions_remaining', 'sessions_total', 'expires_on'])
+        .select(['sessions_remaining', 'sessions_total', 'sessions_bonus', 'expires_on'])
         .where('id', '=', packageId)
         .executeTakeFirstOrThrow(),
     ]);
@@ -303,7 +303,7 @@ export class CheckinService {
       bookingId,
       status: 'CHECKED_IN',
       sessionsRemaining: mp.sessions_remaining,
-      sessionsTotal: mp.sessions_total,
+      sessionsTotal: mp.sessions_total + mp.sessions_bonus,
       revenueRecognized: Number(re?.amount ?? 0),
       teachCommission: Number(ce?.amount ?? 0),
       lowBalanceWarning: mp.sessions_remaining <= CANH_BAO_SAP_HET,

@@ -6,6 +6,8 @@ import { LoaderCircle, UserPlus } from 'lucide-react';
 import { Card, PageHeader } from '../../../../components/ui';
 import { goiApi } from '../../../../lib/client-api';
 import { useAction } from '../../../../lib/use-action';
+import { DatePicker } from '../../../../components/date-picker';
+import { ngayVN } from '../../../../lib/format';
 
 /**
  * Thêm hội viên. Số điện thoại là định danh TOÀN HỆ THỐNG: người đã có tài
@@ -16,6 +18,7 @@ export default function NewMemberPage() {
   const router = useRouter();
   const [v, setV] = useState({ phone: '', fullName: '', email: '', dob: '', gender: '', source: '', note: '' });
   const { busy, loi, chay } = useAction();
+  const homNay = ngayVN();
   const dat = (k: keyof typeof v) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) =>
     setV((s) => ({ ...s, [k]: e.target.value }));
 
@@ -51,7 +54,7 @@ export default function NewMemberPage() {
           <div className="form-grid">
             <label className="field">
               <span className="field-label">Ngày sinh</span>
-              <input className="input" type="date" value={v.dob} onChange={dat('dob')} />
+              <DatePicker value={v.dob} onChange={(dob) => setV((s) => ({ ...s, dob }))} max={homNay} chonNam />
             </label>
             <label className="field">
               <span className="field-label">Giới tính</span>

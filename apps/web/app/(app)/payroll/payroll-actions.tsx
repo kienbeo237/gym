@@ -96,7 +96,7 @@ export function PayrollActions({ d, thangNay }: { d: PayrollResponse; thangNay: 
                 <button type="submit" className="btn btn-primary btn-sm" disabled={busy || lyDo.trim().length < 10}>
                   {busy && <LoaderCircle size={14} className="spin" />} Mở lại
                 </button>
-                <button type="button" className="btn btn-ghost btn-sm" onClick={() => setMoLaiMo(false)} disabled={busy}>Thôi</button>
+                <button type="button" className="btn btn-ghost btn-sm" onClick={() => setMoLaiMo(false)} disabled={busy}>Đóng</button>
               </div>
             </form>
           )}

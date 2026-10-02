@@ -255,6 +255,10 @@ export interface MemberPackage {
   price_gross: Int8;
   price_net: Generated<Int8 | null>;
   /**
+   * Tổng buổi được TẶNG = SUM(session_ledger.delta) với reason BONUS. Do trigger giữ, đừng ghi tay.
+   */
+  sessions_bonus: Generated<number>;
+  /**
    * SỐ DƯ buổi tập = SUM(session_ledger.delta). Do trigger giữ, đừng ghi tay.
    */
   sessions_remaining: Generated<number>;
@@ -506,6 +510,20 @@ export interface SessionLedger {
   tenant_id: string;
 }
 
+export interface StaffNotification {
+  body: string;
+  booking_id: string | null;
+  created_at: Generated<Timestamp>;
+  dedupe_key: string;
+  id: Generated<string>;
+  identity_id: string;
+  kind: string;
+  link: string | null;
+  read_at: Timestamp | null;
+  tenant_id: string;
+  title: string;
+}
+
 export interface Tenant {
   created_at: Generated<Timestamp>;
   currency: Generated<string>;
@@ -566,6 +584,15 @@ export interface TenantSubscription {
   tenant_id: string;
   trial_ends_at: Timestamp | null;
   updated_at: Generated<Timestamp>;
+}
+
+export interface TenantTerms {
+  content: string;
+  id: Generated<string>;
+  published_at: Generated<Timestamp>;
+  published_by: string;
+  tenant_id: string;
+  version: number;
 }
 
 export interface TenantUser {
@@ -770,11 +797,13 @@ export interface DB {
   revenue_entry: RevenueEntry;
   schema_migrations: SchemaMigrations;
   session_ledger: SessionLedger;
+  staff_notification: StaffNotification;
   tenant: Tenant;
   tenant_billing_record: TenantBillingRecord;
   tenant_message_usage: TenantMessageUsage;
   tenant_policy: TenantPolicy;
   tenant_subscription: TenantSubscription;
+  tenant_terms: TenantTerms;
   tenant_user: TenantUser;
   tenant_zalo_oa: TenantZaloOa;
   tenant_zns_template: TenantZnsTemplate;

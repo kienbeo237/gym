@@ -39,7 +39,10 @@ export type MemberPackageRow = {
   name: string;
   kind: string;
   status: string;
+  /** Số buổi MUA theo hợp đồng. */
   sessionsTotal: number;
+  /** Số buổi được TẶNG thêm. Tổng được dùng = sessionsTotal + sessionsBonus. */
+  sessionsBonus: number;
   sessionsRemaining: number;
   /** Buổi đã đặt mà chưa tập — tính vào "còn đặt thêm được". */
   sessionsBooked: number;
@@ -77,3 +80,24 @@ export const UpdateMemberRequest = z.object({
   status: z.enum(['ACTIVE', 'INACTIVE', 'BANNED']).optional(),
 });
 export type UpdateMemberRequest = z.infer<typeof UpdateMemberRequest>;
+
+/**
+ * Tặng buổi cho một hợp đồng. Chỉ chủ phòng / quản lý. Lý do bắt buộc — CSDL
+ * cũng chặn (ledger_bonus_accountable). Hợp đồng đã hết hạn thì phải gia hạn
+ * kèm, không thì buổi tặng không dùng được.
+ */
+export const GiftSessionsRequest = z.object({
+  sessions: z.number().int().min(1).max(20),
+  reason: z.string().trim().min(5).max(300),
+  /** Gia hạn thêm N ngày, tính từ max(hạn hiện tại, hôm nay). */
+  extendDays: z.number().int().min(1).max(365).optional(),
+});
+export type GiftSessionsRequest = z.infer<typeof GiftSessionsRequest>;
+
+export const GiftSessionsResponse = z.object({
+  memberPackageId: z.string().uuid(),
+  sessionsBonus: z.number().int(),
+  sessionsRemaining: z.number().int(),
+  expiresOn: z.string(),
+});
+export type GiftSessionsResponse = z.infer<typeof GiftSessionsResponse>;

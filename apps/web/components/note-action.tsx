@@ -112,7 +112,7 @@ export function NoteActions({ actions }: { actions: NoteActionDef[] }) {
               {a.submitLabel}
             </button>
             <button className="btn btn-ghost btn-sm" type="button" onClick={() => setMo(null)} disabled={busy}>
-              Thôi
+              Đóng
             </button>
           </div>
         </form>

@@ -5,6 +5,15 @@ import { ChartLine, CircleAlert, Eye, LoaderCircle, Lock, Plus, TrendingDown, Tr
 import type { ProgressEntry } from '@pt/contracts';
 import { EmptyState } from '../../../components/ui';
 import { ngayISO } from '../../../lib/format';
+import { nenAnh } from '../../../lib/nen-anh';
+import { DatePicker } from '../../../components/date-picker';
+
+/**
+ * Khớp FILE_RULES.PROGRESS_PHOTO.maxBytes (API mới là chốt chặn thật). Không
+ * import giá trị từ @pt/contracts ở client component: gói đó build CommonJS,
+ * kéo vào bundle trình duyệt là webpack báo lỗi.
+ */
+const TOI_DA_ANH = 2_000_000;
 
 const homNayVN = () => new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Ho_Chi_Minh' });
 
@@ -58,6 +67,7 @@ export default function MeProgress() {
       let photoFileId: string | undefined;
 
       if (tep) {
+        const anhTai = await nenAnh(tep, TOI_DA_ANH);
         // Ba bước: xin URL -> PUT thẳng lên S3 -> xác nhận. Máy chủ đọc lại kích
         // thước thật từ S3 ở bước ba, không tin con số khai ở bước một.
         const xin = await fetch('/api/proxy/files/upload-url', {
@@ -65,9 +75,9 @@ export default function MeProgress() {
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({
             ownerType: 'PROGRESS_PHOTO',
-            fileName: tep.name,
-            mime: tep.type || 'image/jpeg',
-            sizeBytes: tep.size,
+            fileName: anhTai.name,
+            mime: anhTai.type,
+            sizeBytes: anhTai.size,
           }),
         });
         const up = await xin.json();
@@ -75,8 +85,8 @@ export default function MeProgress() {
 
         const put = await fetch(up.uploadUrl, {
           method: 'PUT',
-          body: tep,
-          headers: { 'content-type': tep.type || 'image/jpeg' },
+          body: anhTai,
+          headers: { 'content-type': anhTai.type },
         });
         if (!put.ok) throw new Error('Tải ảnh lên không thành công');
 
@@ -122,12 +132,11 @@ export default function MeProgress() {
         <div className="form-grid">
           <label className="field">
             <span className="field-label">Ngày đo</span>
-            <input
-              className="input"
-              type="date"
+            <DatePicker
               value={form.recordedOn}
               max={homNayVN()}
-              onChange={(e) => setForm({ ...form, recordedOn: e.target.value })}
+              required
+              onChange={(recordedOn) => setForm((f) => ({ ...f, recordedOn }))}
             />
           </label>
           <label className="field">
@@ -159,6 +168,7 @@ export default function MeProgress() {
               accept="image/jpeg,image/png,image/webp"
               onChange={(e) => setTep(e.target.files?.[0] ?? null)}
             />
+            <span className="field-hint">Ảnh được tự thu nhỏ trước khi tải lên (tối đa 2MB).</span>
           </label>
         </div>
         <label className="field">

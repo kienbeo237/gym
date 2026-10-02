@@ -53,15 +53,20 @@ export const DownloadUrlResponse = z.object({
 });
 export type DownloadUrlResponse = z.infer<typeof DownloadUrlResponse>;
 
-/** Hạn mức theo loại tệp. Ép ở BACKEND — client khai bao nhiêu cũng được. */
+/**
+ * Hạn mức theo loại tệp. Ép ở BACKEND — client khai bao nhiêu cũng được.
+ *
+ * Ảnh (đại diện, tiến độ) tối đa 2MB: web tự nén trước khi tải (lib/nen-anh),
+ * nên hạn mức thấp không làm khó người dùng mà giữ chi phí lưu trữ / băng thông.
+ */
 export const FILE_RULES: Record<
   FileOwnerType,
   { maxBytes: number; mimes: string[]; downloadTtlSeconds: number }
 > = {
-  MEMBER_AVATAR: { maxBytes: 5_000_000, mimes: ['image/jpeg', 'image/png', 'image/webp'], downloadTtlSeconds: 900 },
-  TRAINER_AVATAR: { maxBytes: 5_000_000, mimes: ['image/jpeg', 'image/png', 'image/webp'], downloadTtlSeconds: 900 },
+  MEMBER_AVATAR: { maxBytes: 2_000_000, mimes: ['image/jpeg', 'image/png', 'image/webp'], downloadTtlSeconds: 900 },
+  TRAINER_AVATAR: { maxBytes: 2_000_000, mimes: ['image/jpeg', 'image/png', 'image/webp'], downloadTtlSeconds: 900 },
   // Ảnh tiến độ cơ thể: hạn 60 giây, đủ để trình duyệt tải xong rồi hết hiệu lực.
-  PROGRESS_PHOTO: { maxBytes: 15_000_000, mimes: ['image/jpeg', 'image/png', 'image/webp'], downloadTtlSeconds: 60 },
+  PROGRESS_PHOTO: { maxBytes: 2_000_000, mimes: ['image/jpeg', 'image/png', 'image/webp'], downloadTtlSeconds: 60 },
   INVOICE_PDF: { maxBytes: 10_000_000, mimes: ['application/pdf'], downloadTtlSeconds: 300 },
   CONTRACT: { maxBytes: 20_000_000, mimes: ['application/pdf', 'image/jpeg', 'image/png'], downloadTtlSeconds: 300 },
   TENANT_LOGO: { maxBytes: 2_000_000, mimes: ['image/jpeg', 'image/png', 'image/webp', 'image/svg+xml'], downloadTtlSeconds: 3600 },

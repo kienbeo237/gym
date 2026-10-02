@@ -7,6 +7,7 @@ import { dichNgay, gioVN, ngayISO, ngayNgan, ngayVN, vnd } from '../../../../lib
 import { LOAI_GOI, TRANG_THAI_BUOI, TRANG_THAI_HOP_DONG } from '../../../../lib/labels';
 import { apiFetch, requireSession } from '../../../../lib/session';
 import { ProfileForm } from './profile-form';
+import { GiftSessions } from './gift-sessions';
 
 export const metadata: Metadata = { title: 'Hồ sơ hội viên' };
 
@@ -20,6 +21,8 @@ export default async function MemberDetailPage({ params }: { params: Promise<{ i
   ]);
 
   const laQuay = session.roles.some((r) => ['OWNER', 'ADMIN', 'RECEPTION'].includes(r));
+  // Tặng buổi: chỉ chủ phòng / quản lý (khớp @Roles của API).
+  const duocTang = session.roles.some((r) => ['OWNER', 'ADMIN'].includes(r));
   const coGoiDung = m.packages.some((p) => p.status === 'ACTIVE');
   const bayGio = new Date().toISOString();
   const sapToi = buoi.filter((b) => b.status === 'BOOKED' && b.endsAt >= bayGio);
@@ -118,7 +121,8 @@ export default async function MemberDetailPage({ params }: { params: Promise<{ i
                           <span className={p.sessionsRemaining <= 3 && p.status === 'ACTIVE' ? 'strong text-danger' : 'strong'}>
                             {p.sessionsRemaining}
                           </span>
-                          <span className="faint"> / {p.sessionsTotal}</span>
+                          <span className="faint"> / {p.sessionsTotal + p.sessionsBonus}</span>
+                          {p.sessionsBonus > 0 && <div className="cell-sub">gồm {p.sessionsBonus} buổi tặng</div>}
                         </td>
                         <td className="num">{p.sessionsBooked}</td>
                         <td className={sapHet ? 'nowrap text-warning' : 'nowrap'}>{ngayISO(p.expiresOn)}</td>
@@ -131,11 +135,20 @@ export default async function MemberDetailPage({ params }: { params: Promise<{ i
                           </Badge>
                         </td>
                         <td>
-                          {p.status === 'ACTIVE' && p.sessionsRemaining > p.sessionsBooked && (
-                            <Link href={`/schedule/new?memberId=${m.id}&packageId=${p.id}`} className="btn btn-ghost btn-sm">
-                              <CalendarPlus size={14} /> Đặt
-                            </Link>
-                          )}
+                          <div className="row-start" style={{ gap: 4, justifyContent: 'flex-end', flexWrap: 'nowrap' }}>
+                            {p.status === 'ACTIVE' && p.sessionsRemaining > p.sessionsBooked && (
+                              <Link href={`/schedule/new?memberId=${m.id}&packageId=${p.id}`} className="btn btn-ghost btn-sm">
+                                <CalendarPlus size={14} /> Đặt
+                              </Link>
+                            )}
+                            {duocTang && p.status !== 'CANCELLED' && p.status !== 'REFUNDED' && (
+                              <GiftSessions
+                                memberId={m.id}
+                                pkg={{ id: p.id, name: p.name, code: p.code, expiresOn: ngayISO(p.expiresOn) }}
+                                quaHan={p.expiresOn < homNay}
+                              />
+                            )}
+                          </div>
                         </td>
                       </tr>
                     );

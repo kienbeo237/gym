@@ -57,6 +57,18 @@ export const TrainerSummary = z.object({
 });
 export type TrainerSummary = z.infer<typeof TrainerSummary>;
 
+/**
+ * Một dòng của ô CHỌN huấn luyện viên (bán gói, ...). Cố ý chỉ có tên: HLV
+ * cũng dùng ô này, và không được thấy lương, hoa hồng, SĐT của đồng nghiệp
+ * như ở TrainerSummary.
+ */
+export const TrainerOption = z.object({
+  id: z.string().uuid(),
+  code: z.string(),
+  fullName: z.string(),
+});
+export type TrainerOption = z.infer<typeof TrainerOption>;
+
 // ---------------------------------------------------------------------------
 
 export const AvailabilitySlot = z.object({

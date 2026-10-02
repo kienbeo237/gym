@@ -1,5 +1,7 @@
 import type { Metadata, Viewport } from 'next';
 import { Be_Vietnam_Pro } from 'next/font/google';
+// Kiểu gốc của lịch chọn ngày TRƯỚC globals.css: globals chỉ đổi biến của nó.
+import 'react-day-picker/style.css';
 import './globals.css';
 
 // Font thiết kế cho tiếng Việt: dấu chồng (ặ, ỗ, ữ) không đè lên dòng trên như

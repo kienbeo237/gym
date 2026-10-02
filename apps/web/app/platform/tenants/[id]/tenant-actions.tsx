@@ -174,7 +174,7 @@ export function TenantActions({
               {nut.find((n) => n.k === cheDo)!.label}
             </button>
             <button className="btn btn-ghost btn-sm" type="button" onClick={() => setCheDo(null)} disabled={busy}>
-              Thôi
+              Quay lại
             </button>
           </div>
         </form>

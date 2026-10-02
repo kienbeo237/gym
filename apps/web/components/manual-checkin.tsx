@@ -128,7 +128,7 @@ export function ManualCheckin({
             setLoi('');
           }}
         >
-          Thôi
+          Đóng
         </button>
       </div>
     </form>

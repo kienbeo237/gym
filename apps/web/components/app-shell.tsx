@@ -14,6 +14,7 @@ import {
   CreditCard,
   Dumbbell,
   FileClock,
+  FileText,
   Gauge,
   HandCoins,
   Landmark,
@@ -30,6 +31,7 @@ import {
 } from 'lucide-react';
 import { TEN_VAI_TRO, mauAvatar, vietTat } from '../lib/format';
 import { LogoutButton } from './logout-button';
+import { NotificationBell, useInbox } from './notification-bell';
 
 type NavItem = {
   href: string;
@@ -55,13 +57,13 @@ const NHOM_PHONG: { title: string; items: NavItem[] }[] = [
     items: [
       { href: '/schedule', label: 'Lịch tập', icon: CalendarDays },
       { href: '/members', label: 'Hội viên', icon: Users },
-      { href: '/trainers', label: 'Huấn luyện viên', icon: Dumbbell },
+      { href: '/trainers', label: 'Huấn luyện viên', icon: Dumbbell, roles: ['OWNER', 'ADMIN', 'RECEPTION'] },
     ],
   },
   {
     title: 'Kinh doanh',
     items: [
-      { href: '/packages', label: 'Gói tập', icon: Package },
+      { href: '/packages', label: 'Gói tập', icon: Package, roles: ['OWNER', 'ADMIN', 'RECEPTION'] },
       { href: '/invoices', label: 'Hoá đơn', icon: Receipt, roles: ['OWNER', 'ADMIN', 'RECEPTION'] },
       { href: '/reports', label: 'Báo cáo', icon: ChartColumn, roles: ['OWNER', 'ADMIN'] },
       { href: '/payroll', label: 'Bảng lương', icon: HandCoins, roles: ['OWNER'] },
@@ -79,6 +81,7 @@ const NHOM_PHONG: { title: string; items: NavItem[] }[] = [
     items: [
       { href: '/settings/subscription', label: 'Gói dịch vụ', icon: CreditCard, roles: ['OWNER', 'ADMIN'] },
       { href: '/settings/booking-policy', label: 'Đặt lịch & vắng', icon: CalendarCog, roles: ['OWNER', 'ADMIN'] },
+      { href: '/settings/terms', label: 'Điều khoản', icon: FileText, roles: ['OWNER', 'ADMIN'] },
       { href: '/settings/zalo', label: 'Zalo OA', icon: Settings, roles: ['OWNER', 'ADMIN'] },
     ],
   },
@@ -133,6 +136,9 @@ export function AppShell({
   }, [open]);
 
   const nenTang = Boolean(platformLevel);
+  // Chuông chỉ có ở khung phòng tập, cho nhân viên (khớp @Roles của /inbox).
+  const coChuong = !nenTang && roles.some((r) => ['OWNER', 'ADMIN', 'RECEPTION', 'PT'].includes(r));
+  const inbox = useInbox(coChuong);
   const nhom = (nenTang ? NHOM_NEN_TANG : NHOM_PHONG).map((g) => ({
     ...g,
     items: g.items.filter(
@@ -161,6 +167,7 @@ export function AppShell({
               {tenantName || 'Phòng tập'}
             </div>
           </div>
+          {coChuong && <NotificationBell inbox={inbox} className="sb-bell" />}
         </div>
 
         {nhom.map((g) => (
@@ -205,6 +212,7 @@ export function AppShell({
             {open ? <X size={20} /> : <Menu size={20} />}
           </button>
           <span className="topbar-title">{hienTai?.label ?? tenantName}</span>
+          {coChuong && <NotificationBell inbox={inbox} className="topbar-bell" />}
         </header>
         <main className="container">{children}</main>
       </div>

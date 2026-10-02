@@ -26,9 +26,17 @@ export function laNhanVien(ctx: RequestContext = must()): boolean {
   return ctx.roles.some((r) => (VAI_TRO_NHAN_VIEN as readonly string[]).includes(r));
 }
 
+/**
+ * Có vai trò hội viên trong danh sách vai trò (không cần ngữ cảnh request —
+ * dùng được lúc cấp token, khi chưa có ngữ cảnh).
+ */
+export function coVaiHoiVien(roles: readonly string[]): boolean {
+  return roles.includes('MEMBER');
+}
+
 /** Chỉ là hội viên: không có vai trò nhân viên nào. */
 export function chiLaHoiVien(ctx: RequestContext = must()): boolean {
-  return !laNhanVien(ctx) && ctx.roles.includes('MEMBER');
+  return !laNhanVien(ctx) && coVaiHoiVien(ctx.roles);
 }
 
 /**

@@ -1183,105 +1183,219 @@ img {
   border-radius: 50%;
 }
 
-.week {
-  display: grid;
-  grid-template-columns: repeat(7, minmax(0, 1fr));
-  gap: 10px;
-}
-
-@media (max-width: 1100px) {
-  .week {
-    grid-template-columns: repeat(7, minmax(190px, 1fr));
-    overflow-x: auto;
-    scroll-snap-type: x mandatory;
-    padding-bottom: 8px;
-  }
-
-  .week > * {
-    scroll-snap-align: start;
-  }
-}
-
-.day {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  min-height: 220px;
-  padding: 10px;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--r-lg);
-}
-
-.day[data-today='true'] {
-  border-color: var(--primary);
-  box-shadow: 0 0 0 3px var(--ring);
-}
-
-.day-head {
+.cal-toolbar {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 2px 4px 8px;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+/* Lưới giờ: cột giờ bên trái + 1 (ngày) hoặc 7 (tuần) cột. Buổi tập đặt tuyệt
+   đối theo giờ bắt đầu / thời lượng, nên nhìn là thấy chỗ trống, chỗ chồng. */
+.tg-scroll {
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  background: var(--surface);
+}
+
+.tg {
+  --gutter: 56px;
+  --colmin: 0px;
+  display: grid;
+  grid-template-columns: var(--gutter) repeat(var(--cols), minmax(var(--colmin), 1fr));
+  min-width: calc(var(--gutter) + var(--cols) * var(--colmin));
+}
+
+.tg[data-view='week'] {
+  --colmin: 120px;
+}
+
+.tg-head,
+.tg-body {
+  display: contents;
+}
+
+.tg-corner,
+.tg-day {
+  background: var(--surface);
   border-bottom: 1px solid var(--border);
 }
 
-.day-name {
-  font-size: 12px;
-  font-weight: 600;
+.tg-day {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  padding: 10px 6px;
+  border-left: 1px solid var(--border);
   color: var(--text-2);
 }
 
-.day-date {
+.tg-day:hover {
+  background: var(--sunken);
+}
+
+.tg-day-name {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.tg-day-date {
   display: grid;
   place-items: center;
-  min-width: 30px;
+  min-width: 28px;
   height: 26px;
   padding: 0 6px;
   border-radius: 7px;
-  font-size: 13px;
+  color: var(--text);
+  font-size: 14px;
   font-weight: 700;
   font-variant-numeric: tabular-nums;
 }
 
-.day[data-today='true'] .day-date {
+.tg-day[data-today='true'] .tg-day-name {
+  color: var(--primary-text);
+}
+
+.tg-day[data-today='true'] .tg-day-date {
   background: var(--primary);
   color: var(--on-primary);
 }
 
-.day-empty {
-  margin: auto 0;
+.tg-day-count {
+  font-size: 11px;
+  color: var(--text-3);
+}
+
+.tg-hours,
+.tg-col {
+  height: var(--h);
+}
+
+.tg-hours {
+  position: relative;
+}
+
+.tg-hours > span {
+  position: absolute;
+  right: 8px;
+  transform: translateY(-50%);
+  font-size: 11px;
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+
+.tg-hours > span:first-child {
+  transform: none;
+  top: 4px !important;
+}
+
+.tg-col {
+  position: relative;
+  border-left: 1px solid var(--border);
+  /* Đường kẻ mỗi giờ (liền) và nửa giờ (mờ). */
+  background-image:
+    linear-gradient(to bottom, var(--border) 1px, transparent 1px),
+    linear-gradient(to bottom, color-mix(in srgb, var(--border) 45%, transparent) 1px, transparent 1px);
+  background-size: 100% var(--hour), 100% var(--hour);
+  background-position: 0 0, 0 calc(var(--hour) / 2);
+}
+
+.tg-col[data-today='true'] {
+  background-color: color-mix(in srgb, var(--primary) 4%, transparent);
+}
+
+.tg-empty {
+  position: absolute;
+  inset: 40% 0 auto;
+  margin: 0;
   text-align: center;
   color: var(--text-3);
+  font-size: 13px;
+}
+
+.tg-event {
+  position: absolute;
+  z-index: 1;
+  gap: 1px;
+  padding: 4px 8px;
+  overflow: hidden;
+  min-width: 0;
+}
+
+.tg-event:hover {
+  z-index: 2;
+}
+
+.tg-event > * {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tg-event .event-tags {
+  white-space: normal;
+}
+
+.tg-event[data-compact='true'] {
+  flex-direction: row;
+  align-items: baseline;
+  gap: 6px;
+  padding-block: 2px;
+}
+
+.tg-event[data-compact='true'] .event-sub {
+  display: none;
+}
+
+.tg[data-view='week'] .tg-event {
+  padding: 3px 6px;
+}
+
+.tg[data-view='week'] .tg-event .event-title {
   font-size: 12px;
 }
 
-/* Điện thoại: cuộn ngang 7 cột chỉ thấy hơn một ngày — chuyển thành danh sách
-   dọc theo ngày, ngày trống thu gọn còn một dòng. */
+.tg[data-view='week'] .tg-event .event-sub {
+  font-size: 11px;
+}
+
+/* Vạch "bây giờ" trên cột hôm nay. */
+.tg-now {
+  position: absolute;
+  left: 0;
+  right: 0;
+  z-index: 2;
+  height: 2px;
+  background: var(--danger);
+  pointer-events: none;
+}
+
+.tg-now::before {
+  content: '';
+  position: absolute;
+  left: -5px;
+  top: -4px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--danger);
+}
+
 @media (max-width: 640px) {
-  .week {
-    grid-template-columns: minmax(0, 1fr);
-    overflow-x: visible;
+  .tg {
+    --gutter: 44px;
   }
 
-  .day {
-    min-height: 0;
+  .tg[data-view='week'] {
+    --colmin: 104px;
   }
 
-  .day:not(:has(.event)) {
-    flex-direction: row;
-    align-items: center;
-    padding: 8px 10px;
-  }
-
-  .day:not(:has(.event)) .day-head {
-    flex: 1;
-    border-bottom: 0;
-    padding: 0 4px;
-  }
-
-  .day:not(:has(.event)) .day-empty {
-    margin: 0;
+  .tg-day-count {
+    display: none;
   }
 }
 
@@ -2239,4 +2353,333 @@ code {
   .repeat-row > :last-child {
     justify-self: end;
   }
+}
+
+/* Hộp thoại (thẻ <dialog> gốc: showModal() lo khoá nền, Esc, focus). */
+.dialog {
+  width: min(440px, calc(100vw - 32px));
+  max-height: calc(100dvh - 32px);
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: var(--shadow-lg);
+}
+
+.dialog::backdrop {
+  background: rgba(15, 20, 34, 0.45);
+}
+
+.dialog-body {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 20px;
+}
+
+.dialog-title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 700;
+}
+
+/* ------------------------------------------------- ô chọn ngày / giờ */
+/* Lớp nổi (Radix Popover) — lịch chọn ngày, danh sách giờ. */
+.popover {
+  z-index: 70;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: var(--shadow-lg);
+}
+
+.popover-foot {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  padding-top: 6px;
+  border-top: 1px solid var(--border);
+}
+
+/* react-day-picker: chỉ đổi biến của nó sang token của mình, không viết lại. */
+.popover .rdp-root,
+.calendar-mini .rdp-root {
+  --rdp-accent-color: var(--primary);
+  --rdp-accent-background-color: var(--primary-soft);
+  --rdp-today-color: var(--primary-text);
+  --rdp-day-height: 38px;
+  --rdp-day-width: 38px;
+  --rdp-day_button-height: 34px;
+  --rdp-day_button-width: 34px;
+  --rdp-day_button-border-radius: var(--r-sm);
+  --rdp-nav-height: 2.25rem;
+  --rdp-nav_button-height: 2rem;
+  --rdp-nav_button-width: 2rem;
+  --rdp-weekday-opacity: 1;
+  font-size: 14px;
+}
+
+.rdp-weekday {
+  color: var(--text-3);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.rdp-caption_label {
+  font-size: 14px;
+  font-weight: 700;
+  text-transform: capitalize;
+}
+
+.rdp-chevron {
+  fill: var(--text-2);
+}
+
+.rdp-day_button:hover:not([disabled]) {
+  background: var(--sunken);
+}
+
+.rdp-selected .rdp-day_button {
+  background: var(--primary);
+  color: var(--on-primary);
+  border-color: var(--primary);
+  font-weight: 600;
+}
+
+.rdp-today:not(.rdp-selected) .rdp-day_button {
+  font-weight: 700;
+  box-shadow: inset 0 -2px 0 var(--primary);
+}
+
+.rdp-dropdown_root {
+  border-radius: var(--r-sm);
+}
+
+.date-field .input {
+  padding-right: 40px;
+}
+
+.date-field .input[aria-invalid='true'] {
+  border-color: var(--danger);
+}
+
+.time-field {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.popover-list {
+  padding: 4px;
+}
+
+.time-list {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 2px;
+  max-height: 240px;
+  overflow-y: auto;
+  width: 232px;
+}
+
+.time-opt {
+  padding: 7px 0;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--text);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.time-opt:hover {
+  background: var(--sunken);
+}
+
+.time-opt[aria-selected='true'] {
+  background: var(--primary);
+  color: var(--on-primary);
+  font-weight: 600;
+}
+
+/* ======================================================== CHUÔNG THÔNG BÁO */
+.bell {
+  position: relative;
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--text-2);
+  cursor: pointer;
+}
+
+.bell:hover {
+  background: var(--sunken);
+  color: var(--text);
+}
+
+.sb-bell {
+  margin-left: auto;
+  color: var(--sb-text);
+}
+
+.sb-bell:hover {
+  background: var(--sb-hover);
+  color: var(--sb-text-strong);
+}
+
+.topbar-bell {
+  margin-left: auto;
+}
+
+.bell-count {
+  position: absolute;
+  top: 2px;
+  right: 1px;
+  min-width: 17px;
+  height: 17px;
+  padding: 0 4px;
+  border-radius: 9px;
+  background: var(--danger);
+  color: #fff;
+  font-size: 10.5px;
+  font-weight: 700;
+  line-height: 17px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  box-shadow: 0 0 0 2px var(--surface);
+}
+
+/* Điện thoại: chuông ở thanh trên cùng; trong ngăn kéo thì ẩn cho khỏi hai cái. */
+@media (max-width: 960px) {
+  .sb-bell {
+    display: none;
+  }
+}
+
+.inbox {
+  width: min(380px, calc(100vw - 24px));
+  padding: 0;
+  overflow: hidden;
+}
+
+.inbox-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 46px;
+  padding: 6px 8px 6px 14px;
+  border-bottom: 1px solid var(--border);
+}
+
+.inbox-empty {
+  margin: 0;
+  padding: 22px 16px;
+  color: var(--text-3);
+  font-size: 13px;
+  text-align: center;
+  line-height: 1.5;
+}
+
+.inbox-list {
+  max-height: min(440px, 70vh);
+  margin: 0;
+  padding: 4px;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.inbox-item {
+  display: flex;
+  gap: 10px;
+  width: 100%;
+  padding: 10px;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+
+.inbox-item:hover {
+  background: var(--sunken);
+}
+
+.inbox-item[data-unread='true'] {
+  background: color-mix(in srgb, var(--primary) 6%, transparent);
+}
+
+.inbox-item[data-unread='true']:hover {
+  background: color-mix(in srgb, var(--primary) 11%, transparent);
+}
+
+.inbox-icon {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  background: var(--info-soft);
+  color: var(--info);
+}
+
+.inbox-item[data-kind='PT_AGENDA'] .inbox-icon {
+  background: var(--primary-soft);
+  color: var(--primary-text);
+}
+
+.inbox-item[data-kind='UNCHECKED'] .inbox-icon {
+  background: var(--warning-soft);
+  color: var(--warning);
+}
+
+.inbox-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.inbox-title {
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+.inbox-item[data-unread='true'] .inbox-title::after {
+  content: '';
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-left: 6px;
+  border-radius: 50%;
+  background: var(--primary);
+  vertical-align: middle;
+}
+
+.inbox-body {
+  font-size: 12.5px;
+  color: var(--text-2);
+  line-height: 1.4;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.inbox-time {
+  font-size: 11.5px;
+  color: var(--text-3);
 }

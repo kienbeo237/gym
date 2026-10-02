@@ -13,6 +13,8 @@ export const MyPackage = z.object({
   code: z.string(),
   name: z.string(),
   sessionsTotal: z.number().int(),
+  /** Buổi được tặng thêm. Tổng được dùng = sessionsTotal + sessionsBonus. */
+  sessionsBonus: z.number().int(),
   sessionsRemaining: z.number().int(),
   sessionsUsed: z.number().int(),
   startsOn: z.string(),

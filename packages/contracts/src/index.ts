@@ -39,3 +39,5 @@ export * from './report.js';
 export * from './me.js';
 export * from './notification.js';
 export * from './saas.js';
+export * from './terms.js';
+export * from './inbox.js';

@@ -141,6 +141,12 @@ export class SessionConsumptionService {
     // cho huấn luyện viên khi hội viên vắng mặt, vì người đó đã tới và chờ.
     // Muốn đổi thì thêm cột `pay_teach_on_no_show` vào tenant_policy và đọc ở
     // đúng chỗ này — đừng rải điều kiện ra các service gọi tới.
+    //
+    // Buổi TẶNG (vượt số buổi mua) ghi doanh thu 0 nhưng HLV vẫn dạy thật: hoa
+    // hồng theo % tính trên đơn giá bình quân của hợp đồng, không phải trên 0 —
+    // phòng tặng buổi thì phòng chịu, không bắt HLV dạy không công.
+    const buoiTang = Number(daGhi.so_dong) >= mp.sessions_total;
+    const coSoHoaHong = buoiTang ? Math.round(Number(mp.price_net) / mp.sessions_total) : doanhThu;
     let hoaHong = 0;
     if (args.lyDo === 'CHECKIN') {
       const ngay = args.xayRaLuc.toLocaleDateString('en-CA', { timeZone: 'Asia/Ho_Chi_Minh' });
@@ -154,7 +160,7 @@ export class SessionConsumptionService {
         hoaHong =
           policy.teachMode === 'FIXED'
             ? policy.teachFixedAmount
-            : Math.round((doanhThu * policy.teachPct) / 100);
+            : Math.round((coSoHoaHong * policy.teachPct) / 100);
       }
 
       await tx
@@ -165,7 +171,7 @@ export class SessionConsumptionService {
           kind: 'TEACH',
           member_package_id: args.memberPackageId,
           booking_id: args.bookingId,
-          base_amount: doanhThu,
+          base_amount: coSoHoaHong,
           amount: hoaHong,
           policy_snapshot: JSON.stringify(
             policy ? { ...policy, resolvedOn: ngay } : { missing: true, resolvedOn: ngay },
@@ -179,9 +185,11 @@ export class SessionConsumptionService {
 
     const sau = await tx
       .selectFrom('member_package')
-      .select(['sessions_remaining', 'sessions_total'])
+      .select(['sessions_remaining', 'sessions_total', 'sessions_bonus'])
       .where('id', '=', args.memberPackageId)
       .executeTakeFirstOrThrow();
+    // Hội viên thấy "còn X / Y buổi": Y là tổng được dùng, gồm cả buổi tặng.
+    const tongBuoi = sau.sessions_total + sau.sessions_bonus;
 
     // --- 5. hộp thư đi ----------------------------------------------------
     //
@@ -199,7 +207,7 @@ export class SessionConsumptionService {
         idempotency_key: `${args.lyDo}:${args.bookingId}`,
         payload: JSON.stringify({
           remaining: sau.sessions_remaining,
-          total: sau.sessions_total,
+          total: tongBuoi,
           expiresOn: String(mp.expires_on),
           reason: args.lyDo,
           occurredAt: args.xayRaLuc.toISOString(),
@@ -212,7 +220,7 @@ export class SessionConsumptionService {
       revenueRecognized: doanhThu,
       teachCommission: hoaHong,
       sessionsRemaining: sau.sessions_remaining,
-      sessionsTotal: sau.sessions_total,
+      sessionsTotal: tongBuoi,
     };
   }
 }

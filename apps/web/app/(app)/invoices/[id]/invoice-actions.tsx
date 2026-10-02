@@ -202,7 +202,7 @@ export function InvoiceActions({
               {busy && <LoaderCircle size={14} className="spin" />}
               {mo === 'thu' ? `Xác nhận thu ${vnd(soTien)} ₫` : mo === 'hoan' ? `Xác nhận hoàn ${vnd(soTien)} ₫` : 'Huỷ hoá đơn'}
             </button>
-            <button type="button" className="btn btn-ghost btn-sm" onClick={() => setMo(null)} disabled={busy}>Thôi</button>
+            <button type="button" className="btn btn-ghost btn-sm" onClick={() => setMo(null)} disabled={busy}>Đóng</button>
           </div>
         </form>
       )}

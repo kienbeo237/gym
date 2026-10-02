@@ -7,6 +7,7 @@ import type { AvailabilitySlot } from '@pt/contracts';
 import { goiApi } from '../../../../lib/client-api';
 import { TEN_THU } from '../../../../lib/labels';
 import { useAction } from '../../../../lib/use-action';
+import { TimePicker } from '../../../../components/date-picker';
 
 /** Thứ 2 → Chủ nhật, như lịch treo tường ở Việt Nam. */
 const THU_TU = [1, 2, 3, 4, 5, 6, 0];
@@ -52,10 +53,10 @@ export function AvailabilityEditor({ trainerId, initial }: { trainerId: string; 
               {cua.length === 0 && <span className="small faint" style={{ paddingTop: 8 }}>Nghỉ</span>}
               {cua.map(({ s, i }) => (
                 <div key={i} className="repeat-row" style={{ ['--cols' as string]: '1fr 1fr auto' }}>
-                  <input className="input tabular" type="time" step={900} aria-label={`${TEN_THU[wd]} từ`} value={s.startTime}
-                    onChange={(e) => sua(i, { startTime: e.target.value })} />
-                  <input className="input tabular" type="time" step={900} aria-label={`${TEN_THU[wd]} đến`} value={s.endTime}
-                    onChange={(e) => sua(i, { endTime: e.target.value })} />
+                  <TimePicker aria-label={`${TEN_THU[wd]} từ`} value={s.startTime} max="22:45"
+                    onChange={(startTime) => sua(i, { startTime })} />
+                  <TimePicker aria-label={`${TEN_THU[wd]} đến`} value={s.endTime} min="05:15"
+                    onChange={(endTime) => sua(i, { endTime })} />
                   <button type="button" className="btn btn-ghost btn-sm btn-icon" aria-label="Xoá khung"
                     onClick={() => { setXong(false); setDs((x) => x.filter((_, j) => j !== i)); }}>
                     <Trash2 size={14} />

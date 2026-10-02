@@ -13,6 +13,7 @@ import { ZaloOaService } from '../zalo/zalo-oa.service';
 import { StorageService } from '../storage/storage.service';
 import { PlatformDb } from '../platform/platform-db.service';
 import { BookingService } from '../attendance/booking.service';
+import { StaffReminderService } from '../inbox/staff-reminder.service';
 
 /** Tệp nhịp tim — HEALTHCHECK của container kiểm độ mới của nó. */
 export const TEP_NHIP_TIM = join(tmpdir(), 'pt-worker.alive');
@@ -50,6 +51,7 @@ export class Scheduler implements OnApplicationShutdown {
     private readonly storage: StorageService,
     private readonly platform: PlatformDb,
     private readonly bookings: BookingService,
+    private readonly nhacLich: StaffReminderService,
   ) {}
 
   start(): void {
@@ -64,6 +66,8 @@ export class Scheduler implements OnApplicationShutdown {
       // Đóng buổi đã tập xong; tự đánh vắng (chỉ phòng bật auto_no_show).
       { ten: 'booking-sweep', moiMs: 15 * PHUT, chay: () => this.moiPhong('booking-sweep', 12 * 60, (t) => this.quetBuoi(t)) },
       { ten: 'reconcile', moiMs: 6 * 60 * PHUT, chay: () => this.doiSoat() },
+      // Chuông thông báo nhân viên: nhắc HLV trước 30', lịch dạy 7h, buổi trễ chưa điểm danh.
+      { ten: 'staff-remind', moiMs: 5 * PHUT, chay: () => this.moiPhong('staff-remind', 4 * 60, (t) => this.nhacNhanVien(t)) },
     ];
     for (const j of jobs) this.lap(j, j.ten === 'outbox' ? 500 : 10_000);
     this.log.log(`Worker chạy ${jobs.length} job: ${jobs.map((j) => j.ten).join(', ')}`);
@@ -146,6 +150,14 @@ export class Scheduler implements OnApplicationShutdown {
       () => this.bookings.sweep(),
     );
     if (kq.completed || kq.noShow || kq.failed) this.log.log(`Quét buổi tập phòng ${tenantId}: ${JSON.stringify(kq)}`);
+  }
+
+  private async nhacNhanVien(tenantId: string): Promise<void> {
+    const kq = await requestContext.run(
+      { tenantId, identityId: '', roles: [], requestId: `worker-${randomUUID()}` },
+      () => this.nhacLich.tick(),
+    );
+    if (kq.upcoming || kq.agenda || kq.unchecked) this.log.log(`Nhắc lịch phòng ${tenantId}: ${JSON.stringify(kq)}`);
   }
 
   /**

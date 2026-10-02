@@ -29,6 +29,7 @@ import { DB_AUTH } from '../db/database.module';
 import { RateLimitService } from '../redis/rate-limit.service';
 import { globalKey, phoneKeyPart } from '../redis/redis-keys';
 import { devLoginBat } from '../common/config-guard';
+import { coVaiHoiVien } from '../common/member-scope';
 
 const sha256 = (v: string): string => createHash('sha256').update(v).digest('hex');
 
@@ -428,6 +429,13 @@ export class AuthService {
         .where('identity_id', '=', identityId)
         .executeTakeFirst(),
     ]);
+
+    // Vai trò MEMBER mà không có hồ sơ: dữ liệu lệch. Người này đăng nhập được
+    // nhưng mọi màn hội viên đều bị từ chối (NO_MEMBER_PROFILE) — ghi lại để
+    // tra ra ngay thay vì đoán từ một loạt 403.
+    if (!member && coVaiHoiVien(tenant.roles)) {
+      this.log.warn(`Tài khoản ${identityId} có vai trò MEMBER ở phòng ${tenant.tenantId} nhưng không có hồ sơ hội viên`);
+    }
 
     const payload: Omit<AccessTokenClaims, 'iat' | 'exp'> = {
       sub: identityId,

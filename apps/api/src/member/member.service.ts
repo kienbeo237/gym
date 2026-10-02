@@ -2,6 +2,8 @@ import { BadRequestException, Injectable, NotFoundException } from '@nestjs/comm
 import { sql } from 'kysely';
 import type {
   CreateMemberRequest,
+  GiftSessionsRequest,
+  GiftSessionsResponse,
   ListMemberQuery,
   MemberDetail,
   MemberSummary,
@@ -128,7 +130,8 @@ export class MemberService {
         .leftJoin('identity as ti', 'ti.id', 't.identity_id')
         .select((eb) => [
           'mp.id', 'mp.code', 'mp.name_snapshot as name', 'pt.kind', 'mp.status',
-          'mp.sessions_total as sessionsTotal', 'mp.sessions_remaining as sessionsRemaining',
+          'mp.sessions_total as sessionsTotal', 'mp.sessions_bonus as sessionsBonus',
+          'mp.sessions_remaining as sessionsRemaining',
           'mp.starts_on as startsOn', 'mp.expires_on as expiresOn',
           'mp.trainer_id as trainerId', 'ti.full_name as trainerName',
           eb
@@ -172,6 +175,7 @@ export class MemberService {
           kind: r.kind,
           status: r.status,
           sessionsTotal: r.sessionsTotal,
+          sessionsBonus: r.sessionsBonus,
           sessionsRemaining: r.sessionsRemaining,
           sessionsBooked: Number(r.booked ?? 0),
           startsOn: String(r.startsOn),
@@ -180,6 +184,107 @@ export class MemberService {
           trainerName: r.trainerName,
           outstanding: Number(r.outstanding ?? 0),
         })),
+      };
+    });
+  }
+
+  /**
+   * Tặng buổi cho một hợp đồng: một dòng BONUS trong sổ cái (trigger tự cộng
+   * sessions_remaining và sessions_bonus), kèm nhật ký kiểm toán.
+   *
+   * - Hợp đồng đã huỷ / hoàn tiền: không tặng — buổi sẽ nằm trên một hợp đồng
+   *   không ai dùng được, và làm lệch đối soát hoàn tiền.
+   * - Hợp đồng đã quá hạn: phải gia hạn kèm (`extendDays`), không thì hội viên
+   *   thấy "+3 buổi" mà không đặt lịch được buổi nào.
+   * - Doanh thu không đổi: buổi vượt số buổi mua ghi nhận 0 đồng.
+   */
+  async giftSessions(memberId: string, packageId: string, dto: GiftSessionsRequest): Promise<GiftSessionsResponse> {
+    const ctx = requireContext();
+
+    return this.tdb.run(async (tx) => {
+      // Khoá như điểm danh: tặng và trừ buổi cùng lúc không được đọc số dư cũ.
+      const mp = await tx
+        .selectFrom('member_package')
+        .select((eb) => [
+          'id', 'status', 'sessions_bonus', 'sessions_remaining', 'expires_on',
+          eb(sql`expires_on`, '<', sql`(now() AT TIME ZONE 'Asia/Ho_Chi_Minh')::date`).as('quaHan'),
+        ])
+        .where('id', '=', packageId)
+        .where('member_id', '=', memberId)
+        .forUpdate()
+        .executeTakeFirst();
+      if (!mp) throw new NotFoundException('PACKAGE_NOT_FOUND');
+      if (mp.status === 'CANCELLED' || mp.status === 'REFUNDED') {
+        throw new BadRequestException({
+          code: 'PACKAGE_NOT_GIFTABLE',
+          message: 'Hợp đồng đã huỷ hoặc đã hoàn tiền, không tặng buổi được',
+        });
+      }
+      if (mp.quaHan && !dto.extendDays) {
+        throw new BadRequestException({
+          code: 'PACKAGE_EXPIRED_NEEDS_EXTENSION',
+          message: `Hợp đồng đã hết hạn ngày ${String(mp.expires_on)}. Gia hạn thêm ngày để hội viên dùng được buổi tặng.`,
+        });
+      }
+
+      await tx
+        .insertInto('session_ledger')
+        .values({
+          tenant_id: ctx.tenantId,
+          member_package_id: packageId,
+          delta: dto.sessions,
+          reason: 'BONUS',
+          ref_type: 'GIFT',
+          note: dto.reason,
+          created_by: ctx.identityId,
+        })
+        .execute();
+
+      if (dto.extendDays) {
+        await tx
+          .updateTable('member_package')
+          .set({
+            expires_on: sql`greatest(expires_on, (now() AT TIME ZONE 'Asia/Ho_Chi_Minh')::date) + ${dto.extendDays}::int`,
+          })
+          .where('id', '=', packageId)
+          .execute();
+      }
+
+      const sau = await tx
+        .selectFrom('member_package')
+        .select(['sessions_bonus', 'sessions_remaining', 'expires_on'])
+        .where('id', '=', packageId)
+        .executeTakeFirstOrThrow();
+
+      await tx
+        .insertInto('audit_log')
+        .values({
+          tenant_id: ctx.tenantId,
+          actor_id: ctx.identityId,
+          action: 'SESSIONS_GIFTED',
+          entity: 'member_package',
+          entity_id: packageId,
+          before: JSON.stringify({
+            sessionsBonus: mp.sessions_bonus,
+            sessionsRemaining: mp.sessions_remaining,
+            expiresOn: String(mp.expires_on),
+          }),
+          after: JSON.stringify({
+            sessions: dto.sessions,
+            reason: dto.reason,
+            extendDays: dto.extendDays ?? null,
+            sessionsBonus: sau.sessions_bonus,
+            sessionsRemaining: sau.sessions_remaining,
+            expiresOn: String(sau.expires_on),
+          }),
+        })
+        .execute();
+
+      return {
+        memberPackageId: packageId,
+        sessionsBonus: sau.sessions_bonus,
+        sessionsRemaining: sau.sessions_remaining,
+        expiresOn: String(sau.expires_on),
       };
     });
   }

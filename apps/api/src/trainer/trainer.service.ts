@@ -6,6 +6,7 @@ import type {
   Paged,
   SetAvailabilityRequest,
   TrainerDetail,
+  TrainerOption,
   TrainerSummary,
   UpdateTrainerRequest,
 } from '@pt/contracts';
@@ -16,6 +17,19 @@ import { loiHanMucGoi } from '../common/saas-policy';
 @Injectable()
 export class TrainerService {
   constructor(private readonly tdb: TenantDb) {}
+
+  /** HLV đang làm, cho ô chọn. Không kèm số liệu nào — xem TrainerOption. */
+  async options(): Promise<TrainerOption[]> {
+    return this.tdb.run((tx) =>
+      tx
+        .selectFrom('trainer as t')
+        .innerJoin('identity as i', 'i.id', 't.identity_id')
+        .select(['t.id', 't.code', 'i.full_name as fullName'])
+        .where('t.status', '=', 'ACTIVE')
+        .orderBy('i.full_name')
+        .execute(),
+    );
+  }
 
   async list(q: ListTrainerQuery): Promise<Paged<TrainerSummary>> {
     return this.tdb.run(async (tx) => {

@@ -113,6 +113,7 @@ export const CheckinResponse = z.object({
   bookingId: z.string().uuid(),
   status: BookingStatus,
   sessionsRemaining: z.number().int(),
+  /** Tổng buổi được dùng = mua + tặng. */
   sessionsTotal: z.number().int(),
   /** Doanh thu ghi nhận cho buổi này. */
   revenueRecognized: z.number().int(),

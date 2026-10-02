@@ -43,6 +43,19 @@ export type Session = {
 export const isStaff = (s: Session) => s.roles.some((r) => STAFF_ROLES.includes(r));
 export const isPlatform = (s: Session) => s.platformLevel !== null;
 
+/**
+ * Hồ sơ HLV của người đang đăng nhập (claim `trid`), đọc KHÔNG kiểm chữ ký —
+ * chỉ để chọn mặc định trên giao diện (vd. lịch "của tôi"). Quyền thật API kiểm.
+ */
+export function trainerIdCuaToi(s: Session): string | null {
+  try {
+    const p = JSON.parse(Buffer.from(s.accessToken.split('.')[1] ?? '', 'base64url').toString('utf8')) as { trid?: string };
+    return p.trid ?? null;
+  } catch {
+    return null;
+  }
+}
+
 const THU_TU_CAP = ['SUPPORT', 'OPS', 'SUPER'];
 /** Phiên nền tảng có đủ cấp `can` không — chỉ để ẩn nút, API vẫn tự kiểm. */
 export const duCap = (s: Session, can: 'SUPPORT' | 'OPS' | 'SUPER') =>
@@ -82,6 +95,12 @@ export async function apiFetch<T>(path: string, session: Session): Promise<T> {
   });
   if (res.status === 401) redirect('/login');
   if (res.status === 404) notFound();
-  if (!res.ok) throw new Error(`API ${path} lỗi ${res.status}`);
+  if (!res.ok) {
+    // Kèm mã lỗi của API vào log máy chủ: "403" trơn không phân biệt được thiếu
+    // hồ sơ hội viên (NO_MEMBER_PROFILE) với sai vai trò (ROLE_NOT_ALLOWED).
+    const body = (await res.json().catch(() => null)) as { code?: unknown; message?: unknown } | null;
+    const ma = typeof body?.code === 'string' ? body.code : typeof body?.message === 'string' ? body.message : '';
+    throw new Error(`API ${path} lỗi ${res.status}${ma ? ` ${ma}` : ''}`);
+  }
   return res.json() as Promise<T>;
 }

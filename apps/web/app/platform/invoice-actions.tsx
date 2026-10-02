@@ -133,7 +133,7 @@ export function InvoiceActions({ id, amount, transferRef }: { id: string; amount
               {cheDo === 'confirm' ? 'Xác nhận đã nhận tiền' : cheDo === 'waive' ? 'Miễn phí kỳ này' : 'Huỷ hoá đơn'}
             </button>
             <button className="btn btn-ghost btn-sm" type="button" onClick={() => setCheDo(null)} disabled={busy}>
-              Thôi
+              Đóng
             </button>
           </div>
         </form>

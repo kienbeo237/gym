@@ -67,7 +67,7 @@ export function PlanRequestButton({ planCode, planName, upgrade }: { planCode: s
           {busy && <LoaderCircle size={14} className="spin" />} Gửi yêu cầu {planName}
         </button>
         <button className="btn btn-ghost btn-sm" type="button" onClick={() => setMo(false)} disabled={busy}>
-          Thôi
+          Đóng
         </button>
       </div>
     </form>

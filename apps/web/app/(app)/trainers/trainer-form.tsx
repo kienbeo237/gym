@@ -8,6 +8,7 @@ import { Alert, Card } from '../../../components/ui';
 import { goiApi } from '../../../lib/client-api';
 import { ngayISO, vnd } from '../../../lib/format';
 import { useAction } from '../../../lib/use-action';
+import { DatePicker } from '../../../components/date-picker';
 
 type HoaHong = { salePct: number; teachMode: 'FIXED' | 'PCT'; teachFixedAmount: number; teachPct: number };
 
@@ -119,7 +120,13 @@ export function TrainerForm({ trainer }: { trainer?: TrainerDetail }) {
             </label>
             <label className="field">
               <span className="field-label">Ngày vào làm</span>
-              <input className="input" type="date" value={v.hiredOn} onChange={dat('hiredOn')} />
+              <DatePicker
+                value={v.hiredOn}
+                onChange={(hiredOn) => {
+                  setXong('');
+                  setV((s) => ({ ...s, hiredOn }));
+                }}
+              />
             </label>
           </div>
           <label className="field">

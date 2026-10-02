@@ -31,15 +31,24 @@ export const config = {
 const API = process.env.API_INTERNAL_URL ?? 'http://localhost:4000/api';
 const LAM_MOI_SOM_S = 60;
 
-/** Đọc `exp` của JWT KHÔNG kiểm chữ ký — chỉ để biết đã tới lúc làm mới chưa. */
-function conHan(token: string | undefined): boolean {
-  if (!token) return false;
+type Claims = { exp?: number; tid?: string; roles?: string[]; mid?: string };
+
+/**
+ * Đọc claim của JWT KHÔNG kiểm chữ ký — chỉ để điều hướng (đã tới lúc làm mới
+ * chưa, mở màn nào). Quyền thật API tự kiểm ở mọi request.
+ */
+function docClaims(token: string | undefined): Claims | null {
+  if (!token) return null;
   try {
-    const p = JSON.parse(Buffer.from(token.split('.')[1] ?? '', 'base64url').toString('utf8')) as { exp?: number };
-    return typeof p.exp === 'number' && p.exp - LAM_MOI_SOM_S > Date.now() / 1000;
+    return JSON.parse(Buffer.from(token.split('.')[1] ?? '', 'base64url').toString('utf8')) as Claims;
   } catch {
-    return false;
+    return null;
   }
+}
+
+function conHan(token: string | undefined): boolean {
+  const exp = docClaims(token)?.exp;
+  return typeof exp === 'number' && exp - LAM_MOI_SOM_S > Date.now() / 1000;
 }
 
 /** `chet`: API từ chối hẳn (hết hạn, bị thu hồi) — khác với lỗi mạng tạm thời. */
@@ -90,18 +99,63 @@ function veDangNhap(req: NextRequest): NextResponse | null {
   // /_next, /__nextjs_*: tệp và endpoint nội bộ của Next (kể cả lớp báo lỗi
   // lúc dev) — không phải trang.
   if (pathname.startsWith('/api/') || pathname.startsWith('/_next') || pathname.startsWith('/__next')) return null;
-  const proto = req.headers.get('x-forwarded-proto')?.split(',')[0]?.trim() || req.nextUrl.protocol.replace(':', '');
-  const host = req.headers.get('host') ?? req.nextUrl.host;
-  const dich = new URL('/login', `${proto}://${host}`);
+  const dich = new URL('/login', goc(req));
   if (pathname !== '/') dich.searchParams.set('next', pathname + search);
   return NextResponse.redirect(dich, 307);
+}
+
+/** Origin công khai (sau nginx) — xem veDangNhap. */
+function goc(req: NextRequest): string {
+  const proto = req.headers.get('x-forwarded-proto')?.split(',')[0]?.trim() || req.nextUrl.protocol.replace(':', '');
+  const host = req.headers.get('host') ?? req.nextUrl.host;
+  return `${proto}://${host}`;
+}
+
+/** Khu vực chỉ dành cho một số vai trò. Phải khớp @Roles của API mà màn đó gọi. */
+const KHU_THEO_VAI: { prefix: string; roles: string[] }[] = [
+  // HLV không xem lương, hoa hồng, SĐT của đồng nghiệp; danh mục gói là việc
+  // của quầy. Ô chọn HLV / gói khi bán gói lấy qua API riêng, không qua màn này.
+  { prefix: '/trainers', roles: ['OWNER', 'ADMIN', 'RECEPTION'] },
+  { prefix: '/packages', roles: ['OWNER', 'ADMIN', 'RECEPTION'] },
+  // Cài đặt phòng (gói dịch vụ, chính sách, Zalo, điều khoản) — API đều chỉ mở
+  // cho chủ phòng / quản lý.
+  { prefix: '/settings', roles: ['OWNER', 'ADMIN'] },
+];
+
+/**
+ * Chặn theo quyền TRƯỚC khi render. Làm ở đây chứ không ở layout: Next render
+ * layout và page SONG SONG, nên redirect() trong layout không ngăn được page
+ * gọi API (rồi lỗi 403 ra màn "Không tải được dữ liệu").
+ *
+ * - Thiếu vai trò cho một khu vực -> về lịch tập.
+ * - Mở /me/* mà token không có hồ sơ hội viên (`mid`) -> REWRITE sang màn giải
+ *   thích. Địa chỉ giữ nguyên để đăng nhập lại xong quay về đúng trang (vd. link
+ *   QR điểm danh).
+ */
+function theoQuyen(req: NextRequest, token: string, init?: { request: { headers: Headers } }): NextResponse | null {
+  const c = docClaims(token);
+  if (!c?.tid) return null; // phiên nền tảng: layout của nó tự xử lý
+  const { pathname } = req.nextUrl;
+  const trong = (p: string) => pathname === p || pathname.startsWith(p + '/');
+
+  const khu = KHU_THEO_VAI.find((k) => trong(k.prefix));
+  if (khu && !(c.roles ?? []).some((r) => khu.roles.includes(r))) {
+    return NextResponse.redirect(new URL('/schedule', goc(req)), 307);
+  }
+  if (trong('/me') && !c.mid) {
+    const dich = req.nextUrl.clone();
+    dich.pathname = '/chua-co-ho-so';
+    dich.search = '';
+    return NextResponse.rewrite(dich, init);
+  }
+  return null;
 }
 
 export async function middleware(req: NextRequest): Promise<NextResponse> {
   const rt = req.cookies.get(COOKIE_REFRESH)?.value;
   const at = req.cookies.get(COOKIE_ACCESS)?.value;
   if (!rt && !at) return veDangNhap(req) ?? NextResponse.next();
-  if (!rt || conHan(at)) return NextResponse.next();
+  if (!rt || conHan(at)) return (at ? theoQuyen(req, at) : null) ?? NextResponse.next();
 
   let viec = dangLam.get(rt);
   if (!viec) {
@@ -129,7 +183,8 @@ export async function middleware(req: NextRequest): Promise<NextResponse> {
   // ngay) lẫn response (trình duyệt lưu cho các request sau).
   req.cookies.set(COOKIE_ACCESS, kq.phien.accessToken);
   req.cookies.set(COOKIE_REFRESH, kq.phien.refreshToken);
-  const res = NextResponse.next({ request: { headers: req.headers } });
+  const init = { request: { headers: req.headers } };
+  const res = theoQuyen(req, kq.phien.accessToken, init) ?? NextResponse.next(init);
   datCookiePhien(res.cookies, kq.phien);
   return res;
 }

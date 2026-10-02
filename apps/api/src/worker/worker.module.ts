@@ -8,6 +8,7 @@ import { StorageModule } from '../storage/storage.module';
 import { PlatformDbModule } from '../platform/platform.module';
 import { AttendanceModule } from '../attendance/attendance.module';
 import { CommissionModule } from '../commission/commission.module';
+import { InboxModule } from '../inbox/inbox.module';
 import { Scheduler } from './scheduler.service';
 
 /** Module của tiến trình worker — không HTTP, không guard, không controller nào được phục vụ. */
@@ -23,6 +24,7 @@ import { Scheduler } from './scheduler.service';
     // CommissionModule là @Global trong app; worker phải tự nạp vì Attendance cần nó.
     CommissionModule,
     AttendanceModule,
+    InboxModule,
   ],
   providers: [Scheduler],
 })

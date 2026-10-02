@@ -3,12 +3,13 @@
 import { useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { LoaderCircle, Plus, ShoppingCart, Trash2, TriangleAlert } from 'lucide-react';
-import type { PackageSummary, SellPackageResponse, TrainerSummary } from '@pt/contracts';
+import type { PackageSummary, SellPackageResponse, TrainerOption } from '@pt/contracts';
 import { Alert, Card } from '../../../../../components/ui';
 import { goiApi } from '../../../../../lib/client-api';
 import { dichNgay, ngayVN, vnd } from '../../../../../lib/format';
 import { HINH_THUC_TT, LOAI_GOI } from '../../../../../lib/labels';
 import { khoaMoi, useAction } from '../../../../../lib/use-action';
+import { DatePicker } from '../../../../../components/date-picker';
 
 type Dot = { dueDate: string; amount: number };
 
@@ -40,7 +41,7 @@ export function SellForm({
 }: {
   memberId: string;
   packages: PackageSummary[];
-  trainers: TrainerSummary[];
+  trainers: TrainerOption[];
   defaultTrainerId?: string;
 }) {
   const router = useRouter();
@@ -137,7 +138,7 @@ export function SellForm({
             </label>
             <label className="field">
               <span className="field-label">Ngày bắt đầu</span>
-              <input className="input" type="date" value={batDau} min={dichNgay(homNay, -30)} onChange={(e) => setBatDau(e.target.value)} required />
+              <DatePicker value={batDau} min={dichNgay(homNay, -30)} onChange={setBatDau} required />
             </label>
             <label className="field">
               <span className="field-label">Huấn luyện viên phụ trách{!canPT && <span className="faint"> (không bắt buộc)</span>}</span>
@@ -202,8 +203,8 @@ export function SellForm({
               {dots.map((d, i) => (
                 <div key={i} className="repeat-row" style={{ ['--cols' as string]: '48px 1fr 1fr auto' }}>
                   <span className="strong">#{i + 1}</span>
-                  <input className="input" type="date" aria-label={`Hạn đợt ${i + 1}`} value={d.dueDate} required
-                    onChange={(e) => setDots((s) => s.map((x, j) => (j === i ? { ...x, dueDate: e.target.value } : x)))} />
+                  <DatePicker aria-label={`Hạn đợt ${i + 1}`} value={d.dueDate} required
+                    onChange={(dueDate) => setDots((s) => s.map((x, j) => (j === i ? { ...x, dueDate } : x)))} />
                   <input className="input tabular" type="number" min={1000} step={1000} aria-label={`Số tiền đợt ${i + 1}`} value={d.amount} required
                     onChange={(e) => { setSoTienThu(null); setDots((s) => s.map((x, j) => (j === i ? { ...x, amount: Math.max(0, Math.trunc(Number(e.target.value) || 0)) } : x))); }} />
                   <button type="button" className="btn btn-ghost btn-sm btn-icon" aria-label={`Xoá đợt ${i + 1}`} disabled={dots.length <= 2}

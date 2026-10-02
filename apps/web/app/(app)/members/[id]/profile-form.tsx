@@ -6,6 +6,8 @@ import { LoaderCircle, Save } from 'lucide-react';
 import type { MemberDetail, UpdateMemberRequest } from '@pt/contracts';
 import { goiApi } from '../../../../lib/client-api';
 import { useAction } from '../../../../lib/use-action';
+import { DatePicker } from '../../../../components/date-picker';
+import { ngayVN } from '../../../../lib/format';
 
 type V = { dob: string; gender: string; source: string; note: string; status: string };
 
@@ -55,7 +57,16 @@ export function ProfileForm({ member, readOnly }: { member: MemberDetail; readOn
       <div className="form-grid">
         <label className="field">
           <span className="field-label">Ngày sinh</span>
-          <input className="input" type="date" value={v.dob} onChange={dat('dob')} disabled={readOnly} />
+          <DatePicker
+            value={v.dob}
+            onChange={(dob) => {
+              setXong(false);
+              setV((s) => ({ ...s, dob }));
+            }}
+            max={ngayVN()}
+            chonNam
+            disabled={readOnly}
+          />
         </label>
         <label className="field">
           <span className="field-label">Giới tính</span>

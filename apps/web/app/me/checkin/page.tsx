@@ -28,7 +28,9 @@ const LOI_DIEM_DANH: Record<string, string> = {
     'Buổi tập này không phải của tài khoản đang đăng nhập. Kiểm tra lại bạn đã đăng nhập đúng số điện thoại chưa.',
   BOOKING_NOT_CHECKINABLE: 'Buổi tập này đã được điểm danh, đã huỷ hoặc đã đánh vắng.',
   CHECKIN_OUT_OF_WINDOW: 'Chưa tới giờ (hoặc đã quá giờ) của buổi tập này nên chưa điểm danh được.',
-  NO_SESSION_LEFT: 'Gói tập đã hết buổi. Vui lòng gia hạn tại quầy.',
+  NO_MEMBER_PROFILE:
+    'Tài khoản đang đăng nhập chưa có hồ sơ hội viên ở phòng tập này. Hãy đăng nhập bằng số điện thoại của hội viên.',
+  NO_SESSION_LEFT:'Gói tập đã hết buổi. Vui lòng gia hạn tại quầy.',
   PACKAGE_EXPIRED: 'Gói tập đã hết hạn. Vui lòng gia hạn tại quầy.',
 };
 

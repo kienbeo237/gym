@@ -23,6 +23,8 @@ import { HealthModule } from './health/health.module';
 import { SubscriptionModule } from './subscription/subscription.module';
 import { PlatformModule } from './platform/platform.module';
 import { WebhookModule } from './webhook/webhook.module';
+import { TermsModule } from './terms/terms.module';
+import { InboxModule } from './inbox/inbox.module';
 
 @Module({
   imports: [
@@ -48,6 +50,8 @@ import { WebhookModule } from './webhook/webhook.module';
     SubscriptionModule,
     PlatformModule,
     WebhookModule,
+    TermsModule,
+    InboxModule,
   ],
   providers: [
     // Mặc định là ĐÓNG: mọi route đều cần token, mở ra bằng @Public().

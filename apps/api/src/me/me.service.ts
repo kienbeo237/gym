@@ -69,7 +69,8 @@ export class MeService {
         .leftJoin('identity as ti', 'ti.id', 't.identity_id')
         .select((eb) => [
           'mp.id', 'mp.code', 'mp.name_snapshot as name',
-          'mp.sessions_total as sessionsTotal', 'mp.sessions_remaining as sessionsRemaining',
+          'mp.sessions_total as sessionsTotal', 'mp.sessions_bonus as sessionsBonus',
+          'mp.sessions_remaining as sessionsRemaining',
           'mp.sessions_used as sessionsUsed', 'mp.starts_on as startsOn',
           'mp.expires_on as expiresOn', 'mp.status',
           'ti.full_name as trainerName',
@@ -97,6 +98,7 @@ export class MeService {
         code: r.code,
         name: r.name,
         sessionsTotal: r.sessionsTotal,
+        sessionsBonus: r.sessionsBonus,
         sessionsRemaining: r.sessionsRemaining,
         sessionsUsed: r.sessionsUsed,
         startsOn: String(r.startsOn),

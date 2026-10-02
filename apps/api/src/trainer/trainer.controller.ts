@@ -6,6 +6,7 @@ import {
   UpdateTrainerRequest,
   type Paged,
   type TrainerDetail,
+  type TrainerOption,
   type TrainerSummary,
 } from '@pt/contracts';
 import { TrainerService } from './trainer.service';
@@ -16,10 +17,19 @@ import { ZodPipe } from '../common/zod.pipe';
 export class TrainerController {
   constructor(private readonly trainers: TrainerService) {}
 
+  // Có SĐT, doanh thu, hoa hồng từng người — HLV không xem được của đồng
+  // nghiệp. Ô chọn HLV dùng /trainers/options.
   @Get()
-  @Roles('OWNER', 'ADMIN', 'RECEPTION', 'PT')
+  @Roles('OWNER', 'ADMIN', 'RECEPTION')
   list(@Query(new ZodPipe(ListTrainerQuery)) q: ListTrainerQuery): Promise<Paged<TrainerSummary>> {
     return this.trainers.list(q);
+  }
+
+  // Khai TRƯỚC ':id' — không thì 'options' bị coi là một id.
+  @Get('options')
+  @Roles('OWNER', 'ADMIN', 'RECEPTION', 'PT')
+  options(): Promise<TrainerOption[]> {
+    return this.trainers.options();
   }
 
   @Get(':id')

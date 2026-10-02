@@ -385,7 +385,7 @@ export class BillingService {
       const goi = await tx
         .selectFrom('invoice_item as ii')
         .innerJoin('member_package as mp', 'mp.id', 'ii.member_package_id')
-        .select(['mp.id', 'mp.sessions_total', 'mp.sessions_used'])
+        .select(['mp.id', 'mp.sessions_remaining', 'mp.sessions_used'])
         .where('ii.invoice_id', '=', invoiceId)
         .execute();
 
@@ -396,19 +396,24 @@ export class BillingService {
             message: 'Hợp đồng đã có buổi tập được dùng, không huỷ hoá đơn được',
           });
         }
-        await tx
-          .insertInto('session_ledger')
-          .values({
-            tenant_id: ctx.tenantId,
-            member_package_id: g.id,
-            delta: -g.sessions_total,
-            reason: 'REFUND',
-            ref_type: 'INVOICE',
-            ref_id: invoiceId,
-            note: reason,
-            created_by: ctx.identityId,
-          })
-          .execute();
+        // Đảo về 0 theo SỐ DƯ chứ không theo sessions_total: hợp đồng có thể đã
+        // được TẶNG thêm buổi — trừ đúng số mua thì buổi tặng còn treo lại trên
+        // một hợp đồng đã huỷ.
+        if (g.sessions_remaining !== 0) {
+          await tx
+            .insertInto('session_ledger')
+            .values({
+              tenant_id: ctx.tenantId,
+              member_package_id: g.id,
+              delta: -g.sessions_remaining,
+              reason: 'REFUND',
+              ref_type: 'INVOICE',
+              ref_id: invoiceId,
+              note: reason,
+              created_by: ctx.identityId,
+            })
+            .execute();
+        }
         await tx
           .updateTable('member_package')
           .set({ status: 'CANCELLED' })

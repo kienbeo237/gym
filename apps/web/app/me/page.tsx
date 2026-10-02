@@ -1,5 +1,15 @@
 import Link from 'next/link';
-import { CalendarClock, CalendarPlus, ChevronRight, CircleAlert, Package, TriangleAlert, UserRound, Wallet } from 'lucide-react';
+import {
+  CalendarClock,
+  CalendarPlus,
+  ChevronRight,
+  CircleAlert,
+  FileText,
+  Package,
+  TriangleAlert,
+  UserRound,
+  Wallet,
+} from 'lucide-react';
 import type { MySummary } from '@pt/contracts';
 import { EmptyState } from '../../components/ui';
 import { TZ, ngayISO, vnd } from '../../lib/format';
@@ -130,8 +140,10 @@ export default async function MeHome() {
 
       <div className="stack">
         {dangDung.map((p) => {
-          const daDung = p.sessionsTotal - p.sessionsRemaining;
-          const pct = p.sessionsTotal > 0 ? Math.round((daDung / p.sessionsTotal) * 100) : 0;
+          // Tổng được dùng gồm cả buổi phòng tập tặng thêm.
+          const tong = p.sessionsTotal + p.sessionsBonus;
+          const daDung = tong - p.sessionsRemaining;
+          const pct = tong > 0 ? Math.round((daDung / tong) * 100) : 0;
           const sapHet = p.sessionsRemaining <= 3;
           return (
             <article key={p.id} className="card list-card">
@@ -155,7 +167,8 @@ export default async function MeHome() {
               </div>
               <div className="row small muted">
                 <span>
-                  Đã dùng {daDung}/{p.sessionsTotal} buổi
+                  Đã dùng {daDung}/{tong} buổi
+                  {p.sessionsBonus > 0 && <span className="text-success"> · tặng {p.sessionsBonus}</span>}
                 </span>
                 <span>{pct}%</span>
               </div>
@@ -183,6 +196,13 @@ export default async function MeHome() {
           );
         })}
       </div>
+
+      <Link href="/me/terms" className="row panel small" style={{ gap: 10, padding: '12px 14px' }}>
+        <span className="row-start" style={{ gap: 8 }}>
+          <FileText size={15} className="faint" /> Điều khoản & chính sách phòng tập
+        </span>
+        <ChevronRight size={16} className="faint" />
+      </Link>
     </>
   );
 }
